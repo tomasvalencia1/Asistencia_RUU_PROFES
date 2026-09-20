@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#163a5f">
+  <title>IERUU · Tardanzas</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="page-shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">IERUU · Panel de maestros</p>
+        <h1>Tardanzas de estudiantes</h1>
+        <p class="hero-copy">Consulta los estudiantes por grupo, sus tardanzas acumuladas y cada fecha registrada.</p>
+      </div>
+      <button id="refreshButton" class="refresh-button" type="button">↻ Actualizar</button>
+    </header>
+
+    <section class="notice" aria-label="Aviso de beta">
+      <span aria-hidden="true">●</span>
+      <p>Beta de consulta: los datos se actualizan desde Firebase. Aún no requiere inicio de sesión.</p>
+    </section>
+
+    <section class="summary-grid" aria-label="Resumen de tardanzas">
+      <article class="summary-card">
+        <span>Estudiantes</span>
+        <strong id="studentCount">—</strong>
+      </article>
+      <article class="summary-card">
+        <span>Tardanzas acumuladas</span>
+        <strong id="lateCount">—</strong>
+      </article>
+      <article class="summary-card">
+        <span>Registros de tardanza</span>
+        <strong id="lateRecordCount">—</strong>
+      </article>
+    </section>
+
+    <section class="toolbar" aria-label="Filtros">
+      <label class="search-field" for="searchInput">
+        <span>Buscar estudiante</span>
+        <input id="searchInput" type="search" placeholder="Escribe un nombre" autocomplete="off">
+      </label>
+      <label class="group-field" for="groupSelect">
+        <span>Grupo</span>
+        <select id="groupSelect">
+          <option value="">Todos los grupos</option>
+        </select>
+      </label>
+    </section>
+
+    <p id="syncStatus" class="sync-status" role="status" aria-live="polite">Cargando datos…</p>
+    <section id="groupsContainer" class="groups-container" aria-live="polite"></section>
+  </main>
+
+  <template id="emptyStateTemplate">
+    <section class="empty-state">
+      <h2>No hay estudiantes para mostrar</h2>
+      <p>Verifica que existan datos en <code>estudiantes</code> o modifica los filtros.</p>
+    </section>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>
