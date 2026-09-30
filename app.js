@@ -124,6 +124,14 @@ function text(value) {
   return value === null || value === undefined ? "" : String(value).trim();
 }
 
+// Permite buscar sin preocuparse por mayúsculas, espacios o tildes.
+function searchText(value) {
+  return text(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("es-CO");
+}
+
 function numberOrZero(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 ? Math.trunc(parsed) : 0;
@@ -483,11 +491,14 @@ function renderEvents(student) {
   return column;
 }
 
-function renderStudent(student) {
+function renderStudent(student, showGroup) {
   const card = createElement("article", "student-card");
 
   const identity = createElement("div", "identity-column");
   identity.append(createElement("h3", "student-name", student.name));
+  if (showGroup) {
+    identity.append(createElement("p", "student-group", "Grupo " + student.group));
+  }
   identity.append(createElement("p", "uid-text", "UID: " + student.uid));
   if (canManage()) {
     const actions = createElement("div", "student-actions");
@@ -510,26 +521,39 @@ function renderGroup(rows) {
   const groupMembers = rows
     .filter((student) => student.group === state.activeGroup)
     .sort((first, second) => groupCollator.compare(first.name, second.name));
-  const search = state.search.toLocaleLowerCase("es-CO");
-  const visibleMembers = groupMembers.filter((student) => {
+  const search = searchText(state.search);
+  const studentMatchesSearch = (student) => {
     return !search ||
-      student.name.toLocaleLowerCase("es-CO").includes(search) ||
-      student.uid.toLocaleLowerCase("es-CO").includes(search);
-  });
+      searchText(student.name).includes(search) ||
+      searchText(student.group).includes(search) ||
+      searchText(student.uid).includes(search);
+  };
+  const isSearching = Boolean(search);
+  const visibleMembers = (isSearching ? rows : groupMembers)
+    .filter(studentMatchesSearch)
+    .sort((first, second) => {
+      if (isSearching && first.group !== second.group) {
+        return groupCollator.compare(first.group, second.group);
+      }
+      return groupCollator.compare(first.name, second.name);
+    });
 
-  elements.activeGroupTitle.textContent = "Grupo " + state.activeGroup;
-  elements.activeGroupCount.textContent =
-    String(groupMembers.length) + " estudiante" + (groupMembers.length === 1 ? "" : "s");
+  elements.activeGroupTitle.textContent = isSearching
+    ? "Resultados de búsqueda"
+    : "Grupo " + state.activeGroup;
+  elements.activeGroupCount.textContent = isSearching
+    ? String(visibleMembers.length) + " resultado" + (visibleMembers.length === 1 ? "" : "s")
+    : String(groupMembers.length) + " estudiante" + (groupMembers.length === 1 ? "" : "s");
   elements.studentsContainer.replaceChildren();
 
   if (!visibleMembers.length) {
     const empty = createElement("section", "empty-state");
-    empty.append(createElement("h3", "", search ? "No hay coincidencias" : "Aún no hay estudiantes en este grupo"));
+    empty.append(createElement("h3", "", isSearching ? "No hay coincidencias" : "Aún no hay estudiantes en este grupo"));
     empty.append(createElement(
       "p",
       "",
-      search
-        ? "Prueba con otro nombre o UID."
+      isSearching
+        ? "Prueba con otro nombre, grupo o UID."
         : canManage()
           ? "Usa “Añadir estudiante” para registrar el primer estudiante de este grupo."
           : "Cuando administración registre estudiantes, aparecerán aquí automáticamente."
@@ -538,7 +562,7 @@ function renderGroup(rows) {
     return;
   }
 
-  visibleMembers.forEach((student) => elements.studentsContainer.append(renderStudent(student)));
+  visibleMembers.forEach((student) => elements.studentsContainer.append(renderStudent(student, isSearching)));
 }
 
 function render() {
