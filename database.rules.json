@@ -1,0 +1,52 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+
+    "usuarios": {
+      "$uid": {
+        ".read": "auth != null && auth.uid == $uid",
+        ".write": "auth != null && root.child('usuarios').child(auth.uid).child('activo').val() == true && root.child('usuarios').child(auth.uid).child('rol').val() == 'admin'",
+        ".validate": "!newData.exists() || (newData.numChildren() == 3 && newData.hasChildren(['nombre', 'rol', 'activo']) && newData.child('nombre').isString() && newData.child('nombre').val().length > 0 && newData.child('nombre').val().length <= 80 && newData.child('rol').isString() && (newData.child('rol').val() == 'docente' || newData.child('rol').val() == 'directivo' || newData.child('rol').val() == 'admin') && newData.child('activo').isBoolean())"
+      }
+    },
+
+    "estudiantes": {
+      ".read": "auth != null && root.child('usuarios').child(auth.uid).child('activo').val() == true && (root.child('usuarios').child(auth.uid).child('rol').val() == 'docente' || root.child('usuarios').child(auth.uid).child('rol').val() == 'directivo' || root.child('usuarios').child(auth.uid).child('rol').val() == 'admin')",
+
+      "$uidEtiqueta": {
+        ".read": "auth == null",
+        ".write": "auth != null && root.child('usuarios').child(auth.uid).child('activo').val() == true && (root.child('usuarios').child(auth.uid).child('rol').val() == 'directivo' || root.child('usuarios').child(auth.uid).child('rol').val() == 'admin') && ((!data.exists() && newData.exists() && newData.child('llegadasTarde').val() == 0) || (data.exists() && !newData.exists()))",
+        ".validate": "!newData.exists() || (newData.numChildren() == 3 && newData.hasChildren(['nombre', 'grupo', 'llegadasTarde']) && newData.child('nombre').isString() && newData.child('nombre').val().length > 0 && newData.child('nombre').val().length <= 120 && newData.child('grupo').isString() && newData.child('grupo').val().matches(/^(6|7|8|9|10|11)\\.[1-3]$/) && newData.child('llegadasTarde').isNumber() && newData.child('llegadasTarde').val() >= 0)",
+
+        "llegadasTarde": {
+          ".write": "auth == null && data.isNumber() && newData.isNumber() && newData.val() == data.val() + 1",
+          ".validate": "newData.isNumber() && newData.val() >= 0"
+        }
+      }
+    },
+
+    "registros": {
+      ".read": "auth != null && root.child('usuarios').child(auth.uid).child('activo').val() == true && (root.child('usuarios').child(auth.uid).child('rol').val() == 'docente' || root.child('usuarios').child(auth.uid).child('rol').val() == 'directivo' || root.child('usuarios').child(auth.uid).child('rol').val() == 'admin')",
+
+      "$registroId": {
+        ".write": "(!data.exists() && newData.exists() && auth == null) || (data.exists() && newData.exists() && auth != null && root.child('usuarios').child(auth.uid).child('activo').val() == true && (root.child('usuarios').child(auth.uid).child('rol').val() == 'directivo' || root.child('usuarios').child(auth.uid).child('rol').val() == 'admin') && newData.child('uid').val() == data.child('uid').val() && newData.child('nombre').val() == data.child('nombre').val() && newData.child('grupo').val() == data.child('grupo').val() && newData.child('fecha').val() == data.child('fecha').val() && newData.child('hora').val() == data.child('hora').val() && newData.child('timestamp').val() == data.child('timestamp').val() && newData.child('periodo').val() == data.child('periodo').val() && newData.child('tarde').val() == data.child('tarde').val())",
+        ".validate": "newData.numChildren() >= 8 && newData.numChildren() <= 9 && newData.hasChildren(['uid', 'nombre', 'grupo', 'fecha', 'hora', 'timestamp', 'periodo', 'tarde']) && newData.child('uid').isString() && newData.child('uid').val().length > 0 && newData.child('uid').val().length <= 32 && newData.child('nombre').isString() && newData.child('nombre').val().length > 0 && newData.child('nombre').val().length <= 120 && (data.exists() || (newData.child('grupo').isString() && newData.child('grupo').val().matches(/^(6|7|8|9|10|11)\\.[1-3]$/))) && newData.child('fecha').isString() && newData.child('fecha').val().matches(/^20[0-9][0-9]-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$/) && newData.child('hora').isString() && newData.child('hora').val().matches(/^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/) && newData.child('timestamp').isNumber() && newData.child('periodo').isString() && newData.child('periodo').val().length > 0 && newData.child('periodo').val().length <= 40 && newData.child('tarde').isBoolean() && (data.exists() || (root.child('estudiantes').child(newData.child('uid').val()).exists() && newData.child('nombre').val() == root.child('estudiantes').child(newData.child('uid').val()).child('nombre').val() && newData.child('grupo').val() == root.child('estudiantes').child(newData.child('uid').val()).child('grupo').val())) && (!newData.child('justificacion').exists() || newData.child('tarde').val() == true)",
+
+        "justificacion": {
+          ".validate": "!newData.exists() || (auth != null && root.child('usuarios').child(auth.uid).child('activo').val() == true && (root.child('usuarios').child(auth.uid).child('rol').val() == 'directivo' || root.child('usuarios').child(auth.uid).child('rol').val() == 'admin') && newData.numChildren() == 4 && newData.hasChildren(['estado', 'motivo', 'revisadaPorUid', 'revisadaEn']) && newData.child('estado').isString() && (newData.child('estado').val() == 'pendiente' || newData.child('estado').val() == 'validada' || newData.child('estado').val() == 'rechazada') && newData.child('motivo').isString() && newData.child('motivo').val().length > 0 && newData.child('motivo').val().length <= 500 && newData.child('revisadaPorUid').isString() && newData.child('revisadaPorUid').val() == auth.uid && newData.child('revisadaEn').isNumber() && newData.child('revisadaEn').val() <= now)"
+        }
+      }
+    },
+
+    "config": {
+      "franjas": {
+        ".read": true,
+        ".write": "auth != null && root.child('usuarios').child(auth.uid).child('activo').val() == true && root.child('usuarios').child(auth.uid).child('rol').val() == 'admin'",
+        "$periodo": {
+          ".validate": "!newData.exists() || (newData.numChildren() == 1 && newData.hasChildren(['horaLimite']) && newData.child('horaLimite').isString() && newData.child('horaLimite').val().matches(/^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/))"
+        }
+      }
+    }
+  }
+}

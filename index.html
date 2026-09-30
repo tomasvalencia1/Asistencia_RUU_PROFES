@@ -4,64 +4,160 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#163a5f">
-  <title>IERUU · Tardanzas</title>
+  <title>IERUU · Panel docente</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <main class="page-shell">
-    <header class="hero">
-      <div>
-        <p class="eyebrow">IERUU · Panel de maestros</p>
-        <h1>Tardanzas de estudiantes</h1>
-        <p class="hero-copy">Consulta los estudiantes por grupo, sus tardanzas acumuladas y cada fecha registrada.</p>
+  <main class="app-shell">
+    <section id="loginView" class="login-view" aria-labelledby="loginTitle">
+      <div class="login-card">
+        <p class="eyebrow">IERUU · Asistencia</p>
+        <h1 id="loginTitle">Panel de docentes</h1>
+        <p class="intro">Consulta las tardanzas por grupo y administra estudiantes según tu rol.</p>
+
+        <form id="loginForm" class="stack-form">
+          <label>
+            <span>Correo institucional</span>
+            <input id="emailInput" name="email" type="email" autocomplete="email" required placeholder="nombre@ieruu.edu.co">
+          </label>
+          <label>
+            <span>Contraseña</span>
+            <input id="passwordInput" name="password" type="password" autocomplete="current-password" required placeholder="••••••••">
+          </label>
+          <p id="loginError" class="form-error" role="alert" hidden></p>
+          <button id="loginButton" class="primary-button" type="submit">Ingresar</button>
+        </form>
+
+        <p class="help-text">Tu cuenta y tu rol se crean previamente en Firebase por la administración del colegio.</p>
       </div>
-      <button id="refreshButton" class="refresh-button" type="button">↻ Actualizar</button>
-    </header>
-
-    <section class="notice" aria-label="Aviso de beta">
-      <span aria-hidden="true">●</span>
-      <p>Beta de consulta: los datos se actualizan desde Firebase. Aún no requiere inicio de sesión.</p>
     </section>
 
-    <section class="summary-grid" aria-label="Resumen de tardanzas">
-      <article class="summary-card">
-        <span>Estudiantes</span>
-        <strong id="studentCount">—</strong>
-      </article>
-      <article class="summary-card">
-        <span>Tardanzas acumuladas</span>
-        <strong id="lateCount">—</strong>
-      </article>
-      <article class="summary-card">
-        <span>Registros de tardanza</span>
-        <strong id="lateRecordCount">—</strong>
-      </article>
-    </section>
+    <section id="appView" hidden>
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">IERUU · Panel de asistencia</p>
+          <h1>Tardanzas por grupo</h1>
+          <p class="intro">Los registros nuevos del lector NFC aparecen aquí automáticamente.</p>
+        </div>
+        <div class="account-area">
+          <div class="account-copy">
+            <strong id="userName">—</strong>
+            <span id="userRole" class="role-pill">—</span>
+          </div>
+          <button id="logoutButton" class="secondary-button" type="button">Salir</button>
+        </div>
+      </header>
 
-    <section class="toolbar" aria-label="Filtros">
-      <label class="search-field" for="searchInput">
-        <span>Buscar estudiante</span>
-        <input id="searchInput" type="search" placeholder="Escribe un nombre" autocomplete="off">
-      </label>
-      <label class="group-field" for="groupSelect">
-        <span>Grupo</span>
-        <select id="groupSelect">
-          <option value="">Todos los grupos</option>
-        </select>
-      </label>
-    </section>
+      <section class="notice" aria-label="Acceso del usuario">
+        <span aria-hidden="true">●</span>
+        <p id="accessNotice">Cargando permisos…</p>
+      </section>
 
-    <p id="syncStatus" class="sync-status" role="status" aria-live="polite">Cargando datos…</p>
-    <section id="groupsContainer" class="groups-container" aria-live="polite"></section>
+      <section class="summary-grid" aria-label="Resumen">
+        <article class="summary-card">
+          <span>Estudiantes activos</span>
+          <strong id="studentCount">—</strong>
+        </article>
+        <article class="summary-card">
+          <span>Tardanzas acumuladas</span>
+          <strong id="lateCount">—</strong>
+        </article>
+        <article class="summary-card">
+          <span>Tardanzas registradas</span>
+          <strong id="lateRecordCount">—</strong>
+        </article>
+      </section>
+
+      <section class="controls-panel" aria-label="Controles del panel">
+        <label class="search-field" for="searchInput">
+          <span>Buscar en el grupo seleccionado</span>
+          <input id="searchInput" type="search" autocomplete="off" placeholder="Nombre o UID de la tarjeta">
+        </label>
+        <div class="button-row">
+          <button id="refreshButton" class="secondary-button" type="button">Actualizar</button>
+          <button id="addStudentButton" class="primary-button" type="button" hidden>Añadir estudiante</button>
+        </div>
+      </section>
+
+      <p id="syncStatus" class="sync-status" role="status" aria-live="polite">Conectando con Firebase…</p>
+      <p id="dataWarning" class="data-warning" role="alert" hidden></p>
+
+      <nav id="groupTabs" class="group-tabs" aria-label="Grupos de sexto a undécimo" role="tablist"></nav>
+
+      <section class="group-panel" aria-live="polite">
+        <header class="group-panel-header">
+          <div>
+            <p class="section-label">Grupo seleccionado</p>
+            <h2 id="activeGroupTitle">Grupo 6.1</h2>
+          </div>
+          <span id="activeGroupCount" class="group-count">0 estudiantes</span>
+        </header>
+        <div id="studentsContainer" class="students-container"></div>
+      </section>
+    </section>
   </main>
 
-  <template id="emptyStateTemplate">
-    <section class="empty-state">
-      <h2>No hay estudiantes para mostrar</h2>
-      <p>Verifica que existan datos en <code>estudiantes</code> o modifica los filtros.</p>
-    </section>
-  </template>
+  <dialog id="studentDialog" class="app-dialog" aria-labelledby="studentDialogTitle">
+    <form id="studentForm" class="stack-form" novalidate>
+      <div class="dialog-heading">
+        <div>
+          <p class="eyebrow">Gestión de estudiantes</p>
+          <h2 id="studentDialogTitle">Añadir estudiante</h2>
+        </div>
+        <button class="icon-button" type="button" data-close-dialog="studentDialog" aria-label="Cerrar">×</button>
+      </div>
+      <label>
+        <span>UID de la tarjeta NFC</span>
+        <input id="studentUidInput" name="uid" type="text" required maxlength="32" placeholder="Ejemplo: 5AD56CAD1D4187">
+      </label>
+      <label>
+        <span>Nombre completo</span>
+        <input id="studentNameInput" name="nombre" type="text" required maxlength="120" placeholder="Nombre del estudiante">
+      </label>
+      <label>
+        <span>Grupo</span>
+        <select id="studentGroupInput" name="grupo" required></select>
+      </label>
+      <p id="studentFormError" class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button class="secondary-button" type="button" data-close-dialog="studentDialog">Cancelar</button>
+        <button id="saveStudentButton" class="primary-button" type="submit">Guardar estudiante</button>
+      </div>
+    </form>
+  </dialog>
 
-  <script src="app.js"></script>
+  <dialog id="excuseDialog" class="app-dialog" aria-labelledby="excuseDialogTitle">
+    <form id="excuseForm" class="stack-form" novalidate>
+      <div class="dialog-heading">
+        <div>
+          <p class="eyebrow">Revisión de tardanza</p>
+          <h2 id="excuseDialogTitle">Validar excusa</h2>
+        </div>
+        <button class="icon-button" type="button" data-close-dialog="excuseDialog" aria-label="Cerrar">×</button>
+      </div>
+      <p id="excuseRecordInfo" class="record-info"></p>
+      <label>
+        <span>Estado de la excusa</span>
+        <select id="excuseStatusInput" name="estado" required>
+          <option value="pendiente">Pendiente de revisión</option>
+          <option value="validada">Excusa validada</option>
+          <option value="rechazada">Excusa rechazada</option>
+        </select>
+      </label>
+      <label>
+        <span>Motivo de la llegada tarde o excusa</span>
+        <textarea id="excuseReasonInput" name="motivo" rows="5" maxlength="500" required placeholder="Ejemplo: cita médica, transporte escolar, explicación entregada por acudiente"></textarea>
+      </label>
+      <p id="excuseFormError" class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions dialog-actions-spread">
+        <button id="deleteExcuseButton" class="danger-button" type="button" hidden>Quitar excusa</button>
+        <span class="dialog-spacer"></span>
+        <button class="secondary-button" type="button" data-close-dialog="excuseDialog">Cancelar</button>
+        <button id="saveExcuseButton" class="primary-button" type="submit">Guardar revisión</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="app.js"></script>
 </body>
 </html>
