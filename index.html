@@ -44,6 +44,7 @@
             <strong id="userName">—</strong>
             <span id="userRole" class="role-pill">—</span>
           </div>
+          <button id="adminUsersButton" class="secondary-button admin-users-button" type="button" hidden>Administrar usuarios</button>
           <button id="logoutButton" class="secondary-button" type="button">Salir</button>
         </div>
       </header>
@@ -156,6 +157,69 @@
         <button id="saveExcuseButton" class="primary-button" type="submit">Guardar revisión</button>
       </div>
     </form>
+  </dialog>
+
+  <!-- Sólo se abre para el perfil Administrador. Las acciones se ejecutan en Cloud Functions. -->
+  <dialog id="userAdminDialog" class="app-dialog app-dialog-wide" aria-labelledby="userAdminDialogTitle">
+    <div class="user-admin-content">
+      <div class="dialog-heading">
+        <div>
+          <p class="eyebrow">Administración del sistema</p>
+          <h2 id="userAdminDialogTitle">Usuarios y accesos</h2>
+        </div>
+        <button class="icon-button" type="button" data-close-dialog="userAdminDialog" aria-label="Cerrar">×</button>
+      </div>
+      <p class="record-info">Crea, modifica o retira cuentas del panel. Esta sección sólo está disponible para administradores.</p>
+
+      <form id="userForm" class="stack-form" novalidate>
+        <div class="user-form-heading">
+          <h3 id="userFormTitle">Añadir usuario</h3>
+          <button id="cancelUserEditButton" class="small-button" type="button" hidden>Cancelar edición</button>
+        </div>
+        <div class="user-form-grid">
+          <label>
+            <span>Nombre</span>
+            <input id="managedUserNameInput" name="nombre" type="text" required maxlength="80" placeholder="Nombre completo">
+          </label>
+          <label>
+            <span>Correo institucional</span>
+            <input id="managedUserEmailInput" name="email" type="email" required maxlength="254" placeholder="nombre@ieruu.edu.co">
+          </label>
+          <label>
+            <span>Rol</span>
+            <select id="managedUserRoleInput" name="rol" required>
+              <option value="docente">Docente</option>
+              <option value="directivo">Directivo</option>
+              <option value="admin">Administrador</option>
+            </select>
+          </label>
+          <label>
+            <span id="managedPasswordLabel">Contraseña inicial</span>
+            <input id="managedUserPasswordInput" name="password" type="password" minlength="8" autocomplete="new-password" placeholder="Mínimo 8 caracteres">
+          </label>
+        </div>
+        <label class="checkbox-field">
+          <input id="managedUserActiveInput" name="activo" type="checkbox" checked>
+          <span>Cuenta activa</span>
+        </label>
+        <p id="userFormError" class="form-error" role="alert" hidden></p>
+        <div class="dialog-actions">
+          <button id="saveUserButton" class="primary-button" type="submit">Crear usuario</button>
+        </div>
+      </form>
+
+      <section class="managed-users-section" aria-labelledby="managedUsersTitle">
+        <div class="managed-users-heading">
+          <div>
+            <p class="section-label">Cuentas registradas</p>
+            <h3 id="managedUsersTitle">Personal autorizado</h3>
+          </div>
+          <button id="refreshUsersButton" class="small-button" type="button">Actualizar lista</button>
+        </div>
+        <p id="managedUsersStatus" class="sync-status" role="status">Cargando usuarios…</p>
+        <div id="managedUsersContainer" class="managed-users-list"></div>
+      </section>
+    </div>
   </dialog>
 
   <script type="module" src="app.js"></script>

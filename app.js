@@ -26,11 +26,19 @@ import {
   set,
   update
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js";
+import {
+  getFunctions,
+  httpsCallable
+} from "https://www.gstatic.com/firebasejs/12.19.0/firebase-functions.js";
 import { firebaseConfig } from "./firebase-config.js";
 
 const firebaseApp = initializeApp(firebaseConfig);
 const auth = getAuth(firebaseApp);
 const database = getDatabase(firebaseApp);
+// Las operaciones sobre correos y contraseñas se hacen en el servidor; el navegador no recibe
+// nunca privilegios de Firebase Admin ni credenciales de otros usuarios.
+const functions = getFunctions(firebaseApp, "us-central1");
+const manageUsersCallable = httpsCallable(functions, "manageUsers");
 
 const GROUPS = [];
 for (let grade = 6; grade <= 11; grade += 1) {
@@ -75,6 +83,7 @@ const elements = {
   loginButton: document.querySelector("#loginButton"),
   loginError: document.querySelector("#loginError"),
   logoutButton: document.querySelector("#logoutButton"),
+  adminUsersButton: document.querySelector("#adminUsersButton"),
   userName: document.querySelector("#userName"),
   userRole: document.querySelector("#userRole"),
   accessNotice: document.querySelector("#accessNotice"),
@@ -104,7 +113,22 @@ const elements = {
   excuseReasonInput: document.querySelector("#excuseReasonInput"),
   excuseFormError: document.querySelector("#excuseFormError"),
   saveExcuseButton: document.querySelector("#saveExcuseButton"),
-  deleteExcuseButton: document.querySelector("#deleteExcuseButton")
+  deleteExcuseButton: document.querySelector("#deleteExcuseButton"),
+  userAdminDialog: document.querySelector("#userAdminDialog"),
+  userForm: document.querySelector("#userForm"),
+  userFormTitle: document.querySelector("#userFormTitle"),
+  managedUserNameInput: document.querySelector("#managedUserNameInput"),
+  managedUserEmailInput: document.querySelector("#managedUserEmailInput"),
+  managedUserRoleInput: document.querySelector("#managedUserRoleInput"),
+  managedUserPasswordInput: document.querySelector("#managedUserPasswordInput"),
+  managedPasswordLabel: document.querySelector("#managedPasswordLabel"),
+  managedUserActiveInput: document.querySelector("#managedUserActiveInput"),
+  userFormError: document.querySelector("#userFormError"),
+  saveUserButton: document.querySelector("#saveUserButton"),
+  cancelUserEditButton: document.querySelector("#cancelUserEditButton"),
+  refreshUsersButton: document.querySelector("#refreshUsersButton"),
+  managedUsersStatus: document.querySelector("#managedUsersStatus"),
+  managedUsersContainer: document.querySelector("#managedUsersContainer")
 };
 
 const state = {
@@ -117,7 +141,9 @@ const state = {
   sessionId: 0,
   studentUnsubscribe: null,
   recordUnsubscribe: null,
-  editingRecordId: null
+  editingRecordId: null,
+  managedUsers: [],
+  editingUserUid: null
 };
 
 function text(value) {
@@ -176,6 +202,10 @@ function canManage() {
   return isActiveStaff(state.profile) && MANAGER_ROLES.has(text(state.profile.rol));
 }
 
+function isAdmin() {
+  return isActiveStaff(state.profile) && text(state.profile.rol) === "admin";
+}
+
 function setStatus(message, isError) {
   elements.syncStatus.textContent = message;
   elements.syncStatus.classList.toggle("error", Boolean(isError));
@@ -196,7 +226,13 @@ function showExcuseFormError(message) {
   elements.excuseFormError.hidden = !message;
 }
 
+function showUserFormError(message) {
+  elements.userFormError.textContent = message;
+  elements.userFormError.hidden = !message;
+}
+
 function showLogin() {
+  closeDialog(elements.userAdminDialog);
   elements.appView.hidden = true;
   elements.loginView.hidden = false;
   elements.passwordInput.value = "";
@@ -205,12 +241,15 @@ function showLogin() {
 function showApp() {
   elements.loginView.hidden = true;
   elements.appView.hidden = false;
+  elements.loginForm.reset();
   elements.userName.textContent = text(state.profile.nombre) || text(state.authUser.email) || "Usuario";
   elements.userRole.textContent = roleLabel(text(state.profile.rol));
   elements.addStudentButton.hidden = !canManage();
+  elements.adminUsersButton.hidden = !isAdmin();
+  const currentRole = roleLabel(text(state.profile.rol));
   elements.accessNotice.textContent = canManage()
-    ? "Tu rol permite añadir o quitar estudiantes y revisar, validar o quitar excusas."
-    : "Tu rol permite consultar estudiantes, tardanzas y las excusas registradas. No puedes modificarlas.";
+    ? currentRole + ": puedes añadir o quitar estudiantes y revisar, validar o quitar excusas."
+    : currentRole + ": puedes consultar estudiantes, tardanzas y las excusas registradas. No puedes modificarlas.";
 }
 
 function detachDatabaseListeners() {
@@ -747,6 +786,186 @@ async function deleteExcuse() {
   }
 }
 
+function setManagedUsersStatus(message, isError) {
+  elements.managedUsersStatus.textContent = message;
+  elements.managedUsersStatus.classList.toggle("error", Boolean(isError));
+}
+
+function userAdminErrorMessage(error) {
+  const code = text(error && error.code);
+  if (code === "functions/permission-denied") {
+    return "Esta acción sólo está disponible para administradores activos.";
+  }
+  if (code === "functions/invalid-argument") {
+    return text(error && error.message) || "Revisa los datos del usuario.";
+  }
+  if (code === "functions/already-exists") {
+    return "Ya existe una cuenta con ese correo.";
+  }
+  if (code === "functions/not-found") {
+    return "No se encontró esa cuenta.";
+  }
+  return "No fue posible completar la operación. Verifica que la Cloud Function manageUsers esté publicada.";
+}
+
+function resetUserForm() {
+  state.editingUserUid = null;
+  elements.userForm.reset();
+  elements.managedUserActiveInput.checked = true;
+  elements.userFormTitle.textContent = "Añadir usuario";
+  elements.managedPasswordLabel.textContent = "Contraseña inicial";
+  elements.managedUserPasswordInput.required = true;
+  elements.managedUserPasswordInput.placeholder = "Mínimo 8 caracteres";
+  elements.saveUserButton.textContent = "Crear usuario";
+  elements.cancelUserEditButton.hidden = true;
+  showUserFormError("");
+}
+
+function renderManagedUsers() {
+  elements.managedUsersContainer.replaceChildren();
+  if (!state.managedUsers.length) {
+    const empty = createElement("p", "events-empty", "No hay cuentas de personal registradas.");
+    elements.managedUsersContainer.append(empty);
+    return;
+  }
+
+  state.managedUsers.forEach((user) => {
+    const row = createElement("article", "managed-user-row");
+    const identity = createElement("div");
+    const name = text(user.profile && user.profile.nombre) || text(user.displayName) || "Sin nombre";
+    identity.append(createElement("p", "managed-user-name", name));
+    identity.append(createElement("p", "managed-user-email", text(user.email) || "Correo no disponible"));
+
+    const meta = createElement("div", "managed-user-meta");
+    const role = text(user.profile && user.profile.rol);
+    meta.append(createElement("span", "role-pill", roleLabel(role)));
+    const active = user.profile && user.profile.activo === true && user.disabled !== true;
+    meta.append(createElement("span", "state-pill " + (active ? "state-validada" : "inactive-pill"), active ? "Activa" : "Inactiva"));
+
+    const actions = createElement("div", "managed-user-actions");
+    const editButton = createElement("button", "small-button", "Editar");
+    editButton.type = "button";
+    editButton.addEventListener("click", () => editManagedUser(user));
+    actions.append(editButton);
+
+    // Evita que un administrador borre sin querer la sesión con la que está trabajando.
+    if (user.uid !== state.authUser.uid) {
+      const deleteButton = createElement("button", "small-button danger", "Quitar");
+      deleteButton.type = "button";
+      deleteButton.addEventListener("click", () => deleteManagedUser(user));
+      actions.append(deleteButton);
+    }
+    row.append(identity, meta, actions);
+    elements.managedUsersContainer.append(row);
+  });
+}
+
+async function loadManagedUsers() {
+  if (!isAdmin()) return;
+  elements.refreshUsersButton.disabled = true;
+  setManagedUsersStatus("Cargando usuarios…", false);
+  try {
+    const response = await manageUsersCallable({ action: "list" });
+    state.managedUsers = Array.isArray(response.data && response.data.users) ? response.data.users : [];
+    renderManagedUsers();
+    setManagedUsersStatus(String(state.managedUsers.length) + " cuenta(s) cargada(s).", false);
+  } catch (error) {
+    console.error("No fue posible cargar los usuarios", error);
+    state.managedUsers = [];
+    renderManagedUsers();
+    setManagedUsersStatus(userAdminErrorMessage(error), true);
+  } finally {
+    elements.refreshUsersButton.disabled = false;
+  }
+}
+
+function openUserAdminDialog() {
+  if (!isAdmin()) return;
+  resetUserForm();
+  openDialog(elements.userAdminDialog);
+  loadManagedUsers();
+}
+
+function editManagedUser(user) {
+  if (!isAdmin()) return;
+  state.editingUserUid = text(user.uid);
+  elements.userFormTitle.textContent = "Editar usuario";
+  elements.managedUserNameInput.value = text(user.profile && user.profile.nombre) || text(user.displayName);
+  elements.managedUserEmailInput.value = text(user.email);
+  elements.managedUserRoleInput.value = ROLE_LABELS[text(user.profile && user.profile.rol)]
+    ? text(user.profile.rol)
+    : "docente";
+  elements.managedUserActiveInput.checked = Boolean(user.profile && user.profile.activo === true && user.disabled !== true);
+  elements.managedPasswordLabel.textContent = "Nueva contraseña (opcional)";
+  elements.managedUserPasswordInput.value = "";
+  elements.managedUserPasswordInput.required = false;
+  elements.managedUserPasswordInput.placeholder = "Déjala vacía para conservarla";
+  elements.saveUserButton.textContent = "Guardar cambios";
+  elements.cancelUserEditButton.hidden = false;
+  showUserFormError("");
+  elements.managedUserNameInput.focus();
+}
+
+async function saveManagedUser(event) {
+  event.preventDefault();
+  if (!isAdmin()) return;
+
+  const name = text(elements.managedUserNameInput.value);
+  const email = text(elements.managedUserEmailInput.value).toLocaleLowerCase("es-CO");
+  const role = text(elements.managedUserRoleInput.value);
+  const password = elements.managedUserPasswordInput.value;
+  const active = elements.managedUserActiveInput.checked;
+  const isEditing = Boolean(state.editingUserUid);
+
+  if (!name || name.length > 80) {
+    showUserFormError("Escribe un nombre de máximo 80 caracteres.");
+    return;
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    showUserFormError("Escribe un correo válido.");
+    return;
+  }
+  if (!ROLE_LABELS[role]) {
+    showUserFormError("Selecciona un rol válido.");
+    return;
+  }
+  if ((!isEditing && password.length < 8) || (isEditing && password && password.length < 8)) {
+    showUserFormError("La contraseña debe tener al menos 8 caracteres.");
+    return;
+  }
+
+  elements.saveUserButton.disabled = true;
+  showUserFormError("");
+  try {
+    const payload = { nombre: name, email, rol: role, activo: active };
+    if (password) payload.password = password;
+    if (isEditing) payload.uid = state.editingUserUid;
+    await manageUsersCallable({ action: isEditing ? "update" : "create", ...payload });
+    resetUserForm();
+    await loadManagedUsers();
+  } catch (error) {
+    console.error("No fue posible guardar el usuario", error);
+    showUserFormError(userAdminErrorMessage(error));
+  } finally {
+    elements.saveUserButton.disabled = false;
+  }
+}
+
+async function deleteManagedUser(user) {
+  if (!isAdmin() || user.uid === state.authUser.uid) return;
+  const name = text(user.profile && user.profile.nombre) || text(user.email);
+  if (!window.confirm("¿Quitar la cuenta de " + name + "? No podrá volver a iniciar sesión.")) return;
+
+  try {
+    await manageUsersCallable({ action: "delete", uid: user.uid });
+    if (state.editingUserUid === user.uid) resetUserForm();
+    await loadManagedUsers();
+  } catch (error) {
+    console.error("No fue posible quitar el usuario", error);
+    showUserFormError(userAdminErrorMessage(error));
+  }
+}
+
 elements.loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   showLoginError("");
@@ -773,6 +992,7 @@ elements.logoutButton.addEventListener("click", async () => {
   }
 });
 
+elements.adminUsersButton.addEventListener("click", openUserAdminDialog);
 elements.searchInput.addEventListener("input", (event) => {
   state.search = text(event.target.value);
   render();
@@ -782,6 +1002,9 @@ elements.addStudentButton.addEventListener("click", openStudentDialog);
 elements.studentForm.addEventListener("submit", saveStudent);
 elements.excuseForm.addEventListener("submit", saveExcuse);
 elements.deleteExcuseButton.addEventListener("click", deleteExcuse);
+elements.userForm.addEventListener("submit", saveManagedUser);
+elements.cancelUserEditButton.addEventListener("click", resetUserForm);
+elements.refreshUsersButton.addEventListener("click", loadManagedUsers);
 document.querySelectorAll("[data-close-dialog]").forEach((button) => {
   button.addEventListener("click", () => {
     const dialog = document.querySelector("#" + button.dataset.closeDialog);
@@ -801,6 +1024,8 @@ onAuthStateChanged(auth, async (user) => {
   state.authUser = null;
   state.profile = null;
   state.editingRecordId = null;
+  state.managedUsers = [];
+  state.editingUserUid = null;
 
   if (!user) {
     showLogin();

@@ -20,6 +20,8 @@
 
 * { box-sizing: border-box; }
 
+.login-view[hidden], #appView[hidden] { display: none !important; }
+
 body {
   min-width: 320px;
   margin: 0;
@@ -105,6 +107,7 @@ h2 { margin-bottom: 0; color: var(--navy); }
   gap: 12px;
   flex: 0 0 auto;
 }
+.admin-users-button { white-space: nowrap; }
 
 .account-copy {
   display: grid;
@@ -431,6 +434,50 @@ h2 { margin-bottom: 0; color: var(--navy); }
 }
 .app-dialog::backdrop { background: rgb(11 31 48 / 52%); }
 .app-dialog form { padding: 25px; }
+.app-dialog-wide { width: min(100% - 28px, 900px); }
+.user-admin-content { display: grid; gap: 18px; padding: 25px; }
+.user-admin-content .record-info { margin: 0; }
+.user-admin-content form { padding: 0; }
+.user-form-heading, .managed-users-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.user-form-heading h3, .managed-users-heading h3 { margin: 0; color: var(--navy); }
+.user-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.checkbox-field {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 9px;
+  color: var(--ink) !important;
+}
+.checkbox-field input { width: 18px; min-height: 18px; }
+.managed-users-section {
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+.managed-users-heading { margin-bottom: 10px; }
+.managed-users-list { display: grid; gap: 9px; }
+.managed-user-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(120px, .7fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 12px;
+  border: 1px solid #e0e8ee;
+  border-radius: 10px;
+  background: #fbfdff;
+}
+.managed-user-name { margin: 0 0 3px; color: var(--ink); font-weight: 780; }
+.managed-user-email { margin: 0; color: var(--muted); font-size: .82rem; overflow-wrap: anywhere; }
+.managed-user-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.inactive-pill { color: #7a3a35; background: #ffebe9; }
+.managed-user-actions { display: flex; gap: 7px; flex-wrap: wrap; justify-content: flex-end; }
 
 .stack-form {
   display: grid;
@@ -490,6 +537,9 @@ h2 { margin-bottom: 0; color: var(--navy); }
   .button-row { justify-content: stretch; }
   .button-row button { flex: 1; }
   .student-card { grid-template-columns: 1fr; gap: 15px; }
+  .user-form-grid { grid-template-columns: 1fr; }
+  .managed-user-row { grid-template-columns: 1fr; gap: 9px; }
+  .managed-user-actions { justify-content: flex-start; }
 }
 
 @media (max-width: 520px) {

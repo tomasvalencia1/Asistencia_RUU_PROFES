@@ -14,9 +14,9 @@ Panel web para consultar en vivo los estudiantes y las llegadas tarde que regist
 | --- | --- | --- | --- |
 | Docente | Todo el panel, el motivo y estado de las excusas | No | No |
 | Directivo | Todo el panel | Sí | Sí |
-| Administrador | Todo el panel | Sí | Sí |
+| Administrador | Todo el panel | Sí | Sí, y administrar las cuentas de personal |
 
-Los botones se ocultan para docentes y las reglas de Realtime Database también bloquean las escrituras aunque alguien intente usar las herramientas del navegador.
+Los botones se ocultan para docentes y las reglas de Realtime Database también bloquean las escrituras aunque alguien intente usar las herramientas del navegador. El aviso verde muestra siempre el rol que inició sesión. Al iniciar sesión, la pantalla de acceso se oculta por completo.
 
 Al quitar un estudiante se borra solamente su ficha de estudiantes. Sus tardanzas históricas permanecen visibles en los registros existentes.
 
@@ -26,12 +26,12 @@ Al quitar un estudiante se borra solamente su ficha de estudiantes. Sus tardanza
 
 En Firebase Console abre Configuración del proyecto, sección Tus aplicaciones, y añade una aplicación web. Copia el objeto de configuración que Firebase muestre y reemplaza el contenido de firebase-config.js. Los valores actuales apuntan al proyecto IERUU y sirven como base, pero una configuración propia de aplicación web es la opción recomendada para publicar el panel.
 
-### 2. Activar cuentas de personal
+### 2. Activar cuentas de personal y el primer administrador
 
 1. En Firebase Console abre Authentication, Sign-in method.
 2. Activa Email/Password.
-3. En Users crea una cuenta por cada docente, directivo o administrador.
-4. Copia el UID de cada cuenta creada.
+3. En Users crea al menos la primera cuenta de administrador.
+4. Copia su UID.
 
 ### 3. Asignar los roles
 
@@ -57,9 +57,27 @@ En Realtime Database crea un nodo llamado usuarios. Dentro crea una clave por ca
       }
     }
 
-Los únicos valores válidos de rol son docente, directivo y admin. No implementes una pantalla para que una persona se asigne su propio rol: los roles se preparan desde Firebase Console. Un administrador puede gestionar estos perfiles con las reglas incluidas.
+Los únicos valores válidos de rol son docente, directivo y admin. Crea primero este administrador desde Firebase Console. Después de publicar la función del paso siguiente, ese administrador podrá crear, editar, desactivar o quitar las demás cuentas desde el botón **Administrar usuarios** del panel.
 
-### 4. Corregir los datos anteriores antes de activar las reglas
+### 4. Publicar la función de administración de usuarios
+
+La web no puede administrar contraseñas directamente: sería inseguro exponer esos permisos en Vercel o en el navegador. La carpeta `functions` incluye una Firebase Cloud Function llamada `manageUsers`; allí se gestionan las cuentas con Firebase Admin.
+
+1. Instala la Firebase CLI e inicia sesión con la cuenta propietaria del proyecto:
+
+       npm install -g firebase-tools
+       firebase login
+
+2. Desde la carpeta `IERUU-MaestrosWeb`, publica sólo la función:
+
+       firebase deploy --only functions:manageUsers
+
+3. Acepta la habilitación de Cloud Functions si Firebase la solicita. Normalmente requiere el plan Blaze, aunque el uso pequeño de esta beta suele mantenerse dentro de la cuota gratuita.
+4. Publica la web actualizada en Vercel como lo haces normalmente.
+
+Una vez publicada, inicia sesión con el administrador. En la esquina superior aparecerá **Administrar usuarios**. Desde ese cuadro puedes crear correo, contraseña, rol y estado; editar correo, rol o contraseña; y quitar cuentas. Las contraseñas nunca se guardan ni se muestran en Realtime Database.
+
+### 5. Corregir los datos anteriores antes de activar las reglas
 
 Los grupos nuevos deben guardarse siempre como texto: 6.1, 6.2, 6.3, hasta 11.3.
 
@@ -89,7 +107,7 @@ La franja que lee la app Android debe tener exactamente esta forma:
 
 Luego puedes añadir descanso1 y descanso2 con la misma estructura. La app NFC los lee dinámicamente.
 
-### 5. Publicar las reglas
+### 6. Publicar las reglas
 
 1. Haz primero una exportación de respaldo de Realtime Database.
 2. Abre Realtime Database, pestaña Rules.
@@ -121,6 +139,7 @@ Para publicar, sube estos archivos a Firebase Hosting, Netlify, GitHub Pages o u
 3. Agrega una ficha de prueba al grupo 6.1 y comprueba que aparece al instante en su pestaña.
 4. Acerca su tarjeta al lector Android y confirma que la tardanza aparece en el mes correspondiente.
 5. Valida o rechaza la excusa y vuelve a entrar con una cuenta docente para confirmar que sólo puede leerla.
+6. Inicia sesión con el administrador y abre **Administrar usuarios**. Crea una cuenta docente de prueba, edítala, y confirma que un docente no ve ese botón.
 
 ## Estructura nueva de una justificación
 
