@@ -33,6 +33,7 @@ import {
 import { firebaseConfig } from "./firebase-config.js";
 import { normalizeLateEvents } from "./query.js";
 import { createStatsView } from "./stats.js";
+import { exportToXlsx } from "./export-xlsx.js";
 
 const firebaseApp = initializeApp(firebaseConfig);
 const auth = getAuth(firebaseApp);
@@ -1023,7 +1024,14 @@ document.querySelectorAll("[data-close-dialog]").forEach((button) => {
 
 // Vista de estadísticas compartida por todos los roles: sólo consulta datos ya cargados.
 const statsView = createStatsView({
-  getEvents: () => normalizeLateEvents(state.records, state.students, {})
+  getEvents: () => normalizeLateEvents(state.records, state.students, {}),
+  onExport: (result, range, filters) => exportToXlsx(
+    result,
+    range,
+    filters,
+    (text(state.profile && state.profile.nombre) || text(state.authUser && state.authUser.email) || "Usuario") +
+      " (" + roleLabel(text(state.profile && state.profile.rol)) + ")"
+  )
 });
 
 populateStudentGroups();

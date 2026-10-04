@@ -197,6 +197,134 @@ def test_stats(browser, db):
     context.close()
 
 
+def download_xlsx(page, name):
+    with page.expect_download(timeout=20000) as info:
+        page.click("#statsExportButton")
+    download = info.value
+    target = OUT / name
+    download.save_as(str(target))
+    return download.suggested_filename, target
+
+
+def inspect_xlsx(path):
+    import openpyxl
+    workbook = openpyxl.load_workbook(path)
+    summary, detail = workbook["Resumen"], workbook["Detalle"]
+    total_row = [row for row in summary.iter_rows(values_only=True) if row and row[0] == "Total"][0]
+    detail_rows = [row for row in detail.iter_rows(min_row=2, values_only=True) if row and row[0] is not None]
+    return workbook, summary, detail, total_row, detail_rows
+
+
+def libreoffice_opens(path):
+    import subprocess
+    import tempfile
+    with tempfile.TemporaryDirectory() as folder:
+        result = subprocess.run(
+            ["soffice", "--headless", "--convert-to", "csv", "--outdir", folder, str(path)],
+            capture_output=True, text=True, timeout=120)
+        csv_files = list(Path(folder).glob("*.csv"))
+        return result.returncode == 0 and bool(csv_files), (csv_files[0].read_text(encoding="utf-8", errors="replace")[:300] if csv_files else result.stderr)
+
+
+def test_export(browser, db):
+    import datetime
+    for role_uid in ("uid-docente", "uid-directivo", "uid-admin"):
+        context, page, errors = new_page(browser, db, role_uid)
+        open_stats(page)
+        pick_period(page, "semana")
+        view_total = stat(page, "#statsTotal")
+        name, path = download_xlsx(page, f"semana-{role_uid}.xlsx")
+        check(f"[{role_uid}] nombre del archivo", name == "llegadas-tarde_semana_2026-09-28_a_2026-10-04_generado-2026-10-03.xlsx", name)
+        workbook, summary, detail, total_row, rows = inspect_xlsx(path)
+        check(f"[{role_uid}] hojas Resumen y Detalle", workbook.sheetnames == ["Resumen", "Detalle"], str(workbook.sheetnames))
+        check(f"[{role_uid}] total del Excel = vista", total_row[1] == view_total == len(rows), f"excel={total_row[1]} filas={len(rows)} vista={view_total}")
+        if errors:
+            check(f"[{role_uid}] sin errores de consola en exportación", False, "; ".join(errors[:3]))
+        context.close()
+
+    context, page, errors = new_page(browser, db, "uid-docente")
+    open_stats(page)
+    pick_period(page, "mes-anterior")
+    page.select_option("#statsGroupInput", "6.1")
+    view = {key: stat(page, sel) for key, sel in (("total", "#statsTotal"), ("sin", "#statsWithoutExcuse"), ("val", "#statsValidated"), ("est", "#statsStudents"))}
+    name, path = download_xlsx(page, "septiembre-6-1.xlsx")
+    workbook, summary, detail, total_row, rows = inspect_xlsx(path)
+    check("mes anterior + grupo: totales idénticos (total, sin excusa, validadas, estudiantes)",
+          (total_row[1], total_row[2], total_row[4], total_row[6]) == (view["total"], view["sin"], view["val"], view["est"]),
+          f"excel={total_row} vista={view}")
+    check("con filtro de grupo sólo aparece ese grupo en el resumen",
+          [row[0] for row in summary.iter_rows(min_row=9, values_only=True) if row and row[0]] == ["Grupo 6.1", "Total"])
+    first = rows[0]
+    first_view = page.locator("#statsList li").first.inner_text()
+    check("fecha es un valor de fecha real", isinstance(first[0], datetime.datetime), repr(first[0]))
+    check("hora es un valor de hora real", isinstance(first[1], datetime.time), repr(first[1]))
+    check("formato de fecha dd/mm/yyyy", detail["A2"].number_format == "dd/mm/yyyy", detail["A2"].number_format)
+    check("primera fila del Excel = primera de la vista",
+          first[2] in first_view and first[1].strftime("%H:%M:%S") in first_view, f"{first[:3]} vs {first_view!r}")
+    check("grupo como texto, no número", detail["D2"].value == "6.1" and detail["D2"].data_type == "s", repr(detail["D2"].value))
+    check("encabezado en negrita", detail["A1"].font.b is True)
+    check("primera fila fija (freeze)", detail.freeze_panes == "A2", str(detail.freeze_panes))
+    check("ancho de columna razonable", (detail.column_dimensions["C"].width or 0) >= 30)
+    check("periodo con tildes en el resumen", summary["B2"].value == "Septiembre de 2026", repr(summary["B2"].value))
+    check("rango Desde/Hasta como fechas", summary["B3"].value == datetime.datetime(2026, 9, 1) and summary["B4"].value == datetime.datetime(2026, 9, 30))
+    ok, preview = libreoffice_opens(path)
+    check("LibreOffice abre el archivo sin error", ok, preview[:120])
+
+    # Nombre con ñ y tildes, día específico.
+    pick_period(page, "dia")
+    page.fill("#statsDayInput", "2026-10-03")
+    page.dispatch_event("#statsDayInput", "change")
+    page.select_option("#statsGroupInput", "")
+    page.fill("#statsNameInput", "ñusta")
+    name, path = download_xlsx(page, "dia-nusta.xlsx")
+    workbook, summary, detail, total_row, rows = inspect_xlsx(path)
+    check("tildes y ñ intactas", rows and rows[0][2] == "Ñusta Ibáñez Úsuga" and rows[0][6] == "Cita odontológica — acudiente", repr(rows[:1]))
+    check("filtro de nombre descrito en el resumen", "ñusta" in summary["B5"].value, summary["B5"].value)
+
+    # Periodo vacío.
+    page.fill("#statsNameInput", "")
+    pick_period(page, "mes-de")
+    page.select_option("#statsMonthInput", "2026-07")
+    name, path = download_xlsx(page, "vacio.xlsx")
+    workbook, summary, detail, total_row, rows = inspect_xlsx(path)
+    check("mes sin datos: archivo válido con total 0", total_row[1] == 0 and name.endswith("mes_2026-07_generado-2026-10-03.xlsx"), name)
+    ok, _ = libreoffice_opens(path)
+    check("LibreOffice abre el archivo vacío", ok)
+    context.close()
+
+    # Fallo de red al cargar la biblioteca y reintento.
+    context, page, errors = new_page(browser, db, "uid-docente")
+    attempts = {"count": 0}
+
+    def flaky(route):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            route.abort()
+        else:
+            route.continue_()
+    page.route("**/vendor/write-excel-file-4.1.1.min.js", flaky)
+    open_stats(page)
+    page.click("#statsExportButton")
+    page.wait_for_function("document.querySelector('#statsExportStatus').classList.contains('error')", timeout=10000)
+    check("sin conexión: mensaje de error visible", "No se pudo generar" in page.inner_text("#statsExportStatus"))
+    name, path = download_xlsx(page, "reintento.xlsx")
+    check("reintento tras fallo de red descarga el archivo", path.exists() and attempts["count"] == 2)
+    context.close()
+
+    # Rendimiento con un año escolar grande.
+    big = fixture.build(students_count=1200, late_per_day=120, seed=3)
+    context, page, errors = new_page(browser, big, "uid-docente")
+    open_stats(page)
+    started = page.evaluate("performance.now()")
+    pick_period(page, "mes-anterior")
+    elapsed = page.evaluate(f"performance.now() - {started}")
+    name, path = download_xlsx(page, "grande.xlsx")
+    workbook, summary, detail, total_row, rows = inspect_xlsx(path)
+    check("volumen alto: consulta y exportación correctas", total_row[1] == stat(page, "#statsTotal") == len(rows),
+          f"{len(big['registros'])} registros en la base, {len(rows)} en el mes, consulta {elapsed:.0f} ms")
+    context.close()
+
+
 def main():
     selected = set(sys.argv[1:]) or {"stats", "export", "evidence"}
     db = fixture.build()
