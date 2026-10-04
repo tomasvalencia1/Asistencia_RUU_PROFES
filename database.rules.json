@@ -39,6 +39,11 @@
       }
     },
 
+    "evidencias": {
+      ".read": "auth != null && root.child('usuarios').child(auth.uid).child('activo').val() == true && (root.child('usuarios').child(auth.uid).child('rol').val() == 'docente' || root.child('usuarios').child(auth.uid).child('rol').val() == 'directivo' || root.child('usuarios').child(auth.uid).child('rol').val() == 'admin')",
+      ".write": false
+    },
+
     "config": {
       "franjas": {
         ".read": true,

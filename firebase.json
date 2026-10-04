@@ -1,4 +1,10 @@
 {
+  "database": {
+    "rules": "database.rules.json"
+  },
+  "storage": {
+    "rules": "storage.rules"
+  },
   "functions": {
     "source": "functions"
   },
@@ -10,7 +16,10 @@
       "README.md",
       "database.rules.json",
       "**/.*",
-      "**/node_modules/**"
+      "**/node_modules/**",
+      "storage.rules",
+      "tests/**",
+      "vendor/LICENSES.md"
     ],
     "rewrites": [
       {

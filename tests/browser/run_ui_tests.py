@@ -325,6 +325,290 @@ def test_export(browser, db):
     context.close()
 
 
+EVIDENCE_MOCK = r"""
+window.__MOCK.storage = {};
+window.__MOCK.callables = {
+  async evidencias(data, ctx) {
+    await new Promise((resolve) => setTimeout(resolve, window.__MOCK.functionLatencyMs || 50));
+    const fail = (code, message) => { const error = new Error(message); error.code = 'functions/' + code; throw error; };
+    if (window.__MOCK.functionDown) fail('internal', 'internal');
+    const profile = ctx.user && ctx.db.usuarios[ctx.user.uid];
+    if (!profile) fail('unauthenticated', 'Debes iniciar sesión.');
+    const canView = profile.activo === true && ['docente', 'directivo', 'admin'].includes(profile.rol);
+    const canEdit = profile.activo === true && ['directivo', 'admin'].includes(profile.rol);
+    const id = data.registroId;
+    const meta = (ctx.db.evidencias || {})[id];
+    if (data.action === 'get') {
+      if (!canView) fail('permission-denied', 'Sin acceso');
+      if (!meta) fail('not-found', 'Esta llegada tarde no tiene foto de evidencia.');
+      const file = window.__MOCK.storage[id + '/' + meta.version + (data.tamano === 'completa' ? '' : '_mini')];
+      return { imagen: file, tipo: 'image/jpeg', version: meta.version };
+    }
+    if (data.action === 'upload') {
+      if (!canEdit) fail('permission-denied', 'Sólo directivos y administradores activos pueden adjuntar fotos.');
+      if (window.__MOCK.failNextUpload) { window.__MOCK.failNextUpload = false; fail('unavailable', 'unavailable'); }
+      if (!String(data.imagen).startsWith('/9j/') || !String(data.miniatura).startsWith('/9j/')) fail('invalid-argument', 'No es JPEG');
+      if (atob(data.imagen).length > 1500000 || atob(data.miniatura).length > 120000) fail('invalid-argument', 'Demasiado grande');
+      const record = ctx.db.registros[id];
+      if (!record || !record.justificacion) fail('failed-precondition', 'Primero guarda la excusa; luego adjunta la foto.');
+      const version = Date.now() + Math.floor(Math.random() * 1000);
+      window.__MOCK.storage[id + '/' + version] = data.imagen;
+      window.__MOCK.storage[id + '/' + version + '_mini'] = data.miniatura;
+      if (meta) { delete window.__MOCK.storage[id + '/' + meta.version]; delete window.__MOCK.storage[id + '/' + meta.version + '_mini']; }
+      ctx.writePath('evidencias/' + id, { version, bytes: atob(data.imagen).length, ancho: data.ancho, alto: data.alto, subidaPorUid: ctx.user.uid, subidaEn: version });
+      ctx.notify();
+      window.__MOCK.uploads = (window.__MOCK.uploads || 0) + 1;
+      return { version };
+    }
+    if (data.action === 'delete') {
+      if (!canEdit) fail('permission-denied', 'Sin permiso');
+      Object.keys(window.__MOCK.storage).filter((key) => key.startsWith(id + '/')).forEach((key) => delete window.__MOCK.storage[key]);
+      ctx.writePath('evidencias/' + id, null);
+      ctx.notify();
+      return { deleted: id };
+    }
+    fail('invalid-argument', 'Operación no válida');
+  }
+};
+"""
+
+
+def make_images():
+    """Genera imágenes de prueba: JPEG grande con EXIF (GPS y orientación), PNG con transparencia, falsos HEIC y PDF."""
+    from PIL import Image
+    import random
+    folder = OUT / "imagenes"
+    folder.mkdir(exist_ok=True)
+    rng = random.Random(1)
+    big = Image.effect_noise((4032, 3024), 90).convert("RGB")
+    exif = Image.Exif()
+    exif[0x0112] = 6  # Orientación: girar 90° (foto vertical de celular)
+    exif[0x010F] = "FakePhone"
+    gps = {1: "N", 2: (6.0, 15.0, 0.0), 3: "W", 4: (75.0, 34.0, 0.0)}
+    exif[0x8825] = gps
+    big.save(folder / "foto-celular.jpg", quality=95, exif=exif.tobytes())
+    png = Image.new("RGBA", (900, 600), (0, 0, 0, 0))
+    for x in range(0, 900, 3):
+        for y in range(0, 600, 50):
+            png.putpixel((x, y), (rng.randint(0, 255), 40, 90, 255))
+    png.save(folder / "captura.png")
+    (folder / "IMG_0001.heic").write_bytes(b"\x00\x00\x00\x18ftypheic" + bytes(5000))
+    (folder / "excusa.pdf").write_bytes(b"%PDF-1.7\n" + bytes(3000))
+    with open(folder / "enorme.jpg", "wb") as handle:
+        handle.write(b"\xff\xd8\xff" + bytes(26 * 1024 * 1024))
+    return folder
+
+
+def open_student_events(page, name):
+    page.fill("#searchInput", name)
+    page.wait_for_timeout(150)
+
+
+def wait_status(page, text, timeout=20000):
+    page.wait_for_function(
+        "t => document.querySelector('#evidenceStatus').textContent.includes(t)", arg=text, timeout=timeout)
+
+
+def stored_full_image(page, record_id):
+    import base64
+    import io
+    from PIL import Image
+    data = page.evaluate("id => { const m = window.__MOCK; const meta = m.db.evidencias[id]; return m.storage[id + '/' + meta.version]; }", record_id)
+    return Image.open(io.BytesIO(base64.b64decode(data)))
+
+
+def test_evidence(browser, db):
+    images = make_images()
+    edge_today = [key for key, record in db["registros"].items() if record["uid"] == "EDGE01" and record["fecha"] == "2026-10-03"][0]
+    edge_no_excuse = [key for key, record in db["registros"].items() if record["uid"] == "EDGE01" and record["fecha"] == "2026-10-01"][0]
+
+    context, page, errors = new_page(browser, db, "uid-directivo", extra=EVIDENCE_MOCK)
+    page.on("dialog", lambda dialog: dialog.accept())
+    open_student_events(page, "Ñusta")
+    buttons = page.locator(".student-card .late-event .small-button")
+    buttons.first.click()
+    expect(page.locator("#excuseDialog")).to_be_visible()
+    check("diálogo de excusa muestra la sección de foto", page.locator(".evidence-editor").is_visible())
+    check("escritorio: sin botón de cámara (se usa archivo o arrastrar)", not page.locator("#evidenceCameraButton").is_visible())
+
+    # Archivos no válidos.
+    page.set_input_files("#evidenceFileInput", str(images / "excusa.pdf"))
+    wait_status(page, "no es una imagen")
+    check("PDF rechazado con mensaje claro", True)
+    page.set_input_files("#evidenceFileInput", str(images / "IMG_0001.heic"))
+    wait_status(page, "HEIC")
+    check("HEIC ilegible en este navegador: mensaje con alternativa", "Más compatible" in page.inner_text("#evidenceStatus"))
+    page.set_input_files("#evidenceFileInput", str(images / "enorme.jpg"))
+    wait_status(page, "25 MB")
+    check("imagen de más de 25 MB rechazada", True)
+
+    # Foto pesada de celular: se reduce y se limpia el EXIF.
+    started = page.evaluate("performance.now()")
+    page.set_input_files("#evidenceFileInput", str(images / "foto-celular.jpg"))
+    wait_status(page, "Foto lista")
+    prep_ms = page.evaluate(f"performance.now() - {started}")
+    status = page.inner_text("#evidenceStatus")
+    check("foto de 12 MP preparada", "KB" in status, f"{status} · {prep_ms:.0f} ms")
+    check("vista previa visible antes de subir", page.locator("#evidencePreview").is_visible())
+    page.click("#saveExcuseButton")
+    expect(page.locator("#excuseDialog")).to_be_hidden(timeout=20000)
+    stored = stored_full_image(page, edge_today)
+    check("foto reducida a máximo 1600 px", max(stored.size) <= 1600, str(stored.size))
+    check("orientación EXIF aplicada (vertical)", stored.size[1] > stored.size[0], str(stored.size))
+    check("EXIF eliminado (sin GPS ni modelo)", not stored.getexif(), str(dict(stored.getexif())))
+    size_kb = page.evaluate("id => window.__MOCK.db.evidencias[id].bytes", edge_today) / 1024
+    check("foto comprimida por debajo de 900 KB", size_kb <= 900, f"{size_kb:.0f} KB")
+    check("no se reescribió la excusa al sólo añadir foto",
+          not any(call.get("op") == "update" for call in page.evaluate("window.__MOCK.calls")))
+
+    thumb = page.locator(f".evidence-thumb[data-record-id='{edge_today}']")
+    expect(thumb).to_have_attribute("data-state", "ready", timeout=10000)
+    check("miniatura junto a la excusa", thumb.is_visible())
+    page.screenshot(path=str(OUT / "evidence-row-desktop.png"))
+    thumb.click()
+    expect(page.locator("#evidenceViewer")).to_be_visible()
+    page.wait_for_function("document.querySelector('#evidenceViewerStatus').textContent === ''", timeout=10000)
+    natural = page.evaluate("document.querySelector('#evidenceViewerImage').naturalWidth")
+    check("visor muestra la foto completa", natural > 240, str(natural))
+    src = page.get_attribute("#evidenceViewerImage", "src")
+    check("la imagen se sirve como blob local, sin URL pública", src.startswith("blob:"), src[:30])
+    page.screenshot(path=str(OUT / "evidence-viewer-desktop.png"))
+    page.click("#evidenceViewer [data-close-dialog]")
+
+    # Reemplazo con arrastrar y soltar + fallo de red con reintento.
+    first_version = page.evaluate("id => window.__MOCK.db.evidencias[id].version", edge_today)
+    buttons.first.click()
+    page.wait_for_function("!document.querySelector('#evidencePreview').hidden", timeout=10000)
+    check("al reabrir se ve la foto actual y la opción de reemplazar",
+          page.inner_text("#evidenceFileButton") == "Reemplazar foto" and page.locator("#evidenceRemoveButton").is_visible())
+    png_bytes = (images / "captura.png").read_bytes()
+    handle = page.evaluate_handle("""bytes => {
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([new Uint8Array(bytes)], 'captura.png', { type: 'image/png' }));
+      return transfer;
+    }""", list(png_bytes))
+    page.dispatch_event("#evidenceDropZone", "drop", {"dataTransfer": handle})
+    wait_status(page, "Foto lista")
+    check("arrastrar y soltar acepta la imagen", True)
+    page.evaluate("window.__MOCK.failNextUpload = true; window.__MOCK.functionLatencyMs = 1200")
+    page.click("#saveExcuseButton")
+    wait_status(page, "Subiendo foto")
+    check("estado de carga visible durante la subida", page.locator("#evidenceFileButton").is_disabled())
+    wait_status(page, "no se pudo subir")
+    check("error de subida visible y diálogo abierto", page.locator("#excuseDialog").is_visible() and page.locator("#evidenceRetryButton").is_visible())
+    page.evaluate("window.__MOCK.functionLatencyMs = 50")
+    page.click("#evidenceRetryButton")
+    expect(page.locator("#excuseDialog")).to_be_hidden(timeout=10000)
+    second_version = page.evaluate("id => window.__MOCK.db.evidencias[id].version", edge_today)
+    stored = stored_full_image(page, edge_today)
+    check("reintento reemplaza la foto (nueva versión)", second_version != first_version)
+    check("PNG transparente queda con fondo blanco", stored.convert("RGB").getpixel((5, 5))[0] > 240, str(stored.convert("RGB").getpixel((5, 5))))
+    check("la versión anterior se borró del almacenamiento",
+          page.evaluate("id => Object.keys(window.__MOCK.storage).filter(k => k.startsWith(id + '/')).length", edge_today) == 2)
+
+    # Quitar foto.
+    buttons.first.click()
+    page.wait_for_function("!document.querySelector('#evidencePreview').hidden", timeout=10000)
+    page.click("#evidenceRemoveButton")
+    wait_status(page, "Foto quitada")
+    check("quitar foto borra metadatos", page.evaluate("id => !(window.__MOCK.db.evidencias || {})[id]", edge_today))
+    page.click("#excuseDialog [data-close-dialog]")
+    check("sin foto ya no hay miniatura", page.locator(f".evidence-thumb[data-record-id='{edge_today}']").count() == 0)
+
+    # Excusa nueva con foto en el mismo paso.
+    page.locator(f".late-event:has-text('1 de oct') .small-button").first.click()
+    page.fill("#excuseReasonInput", "Cita médica — soporte adjunto")
+    page.set_input_files("#evidenceFileInput", str(images / "captura.png"))
+    wait_status(page, "Foto lista")
+    page.click("#saveExcuseButton")
+    expect(page.locator("#excuseDialog")).to_be_hidden(timeout=10000)
+    check("excusa nueva + foto en un solo guardado",
+          page.evaluate("id => Boolean(window.__MOCK.db.registros[id].justificacion && window.__MOCK.db.evidencias[id])", edge_no_excuse))
+
+    # Quitar la excusa también quita su foto (primero la foto).
+    page.locator(f".late-event:has-text('1 de oct') .small-button").first.click()
+    page.click("#deleteExcuseButton")
+    expect(page.locator("#excuseDialog")).to_be_hidden(timeout=10000)
+    check("quitar excusa elimina antes su foto",
+          page.evaluate("id => !window.__MOCK.db.registros[id].justificacion && !(window.__MOCK.db.evidencias || {})[id]", edge_no_excuse))
+
+    # Dejar una foto para las pruebas de docente.
+    buttons.first.click()
+    page.set_input_files("#evidenceFileInput", str(images / "captura.png"))
+    wait_status(page, "Foto lista")
+    page.click("#saveExcuseButton")
+    expect(page.locator("#excuseDialog")).to_be_hidden(timeout=10000)
+    shared_db = page.evaluate("window.__MOCK.db")
+    shared_storage = page.evaluate("window.__MOCK.storage")
+    # El único error esperado es el fallo de red inyectado a propósito en la subida.
+    real_errors = [error for error in errors if "Error: unavailable" not in error]
+    check("directivo: sin errores inesperados de consola", not real_errors, "; ".join(real_errors[:3]))
+    context.close()
+
+    # Docente: ve la miniatura y la foto, pero no puede editar.
+    restore = "window.__MOCK.storage = " + json.dumps(shared_storage) + ";"
+    context, page, errors = new_page(browser, shared_db, "uid-docente", extra=EVIDENCE_MOCK + restore)
+    open_student_events(page, "Ñusta")
+    thumb = page.locator(f".evidence-thumb[data-record-id='{edge_today}']")
+    expect(thumb).to_have_attribute("data-state", "ready", timeout=10000)
+    check("docente ve la miniatura", thumb.is_visible())
+    check("docente no tiene botones de excusa", page.locator(".late-event .small-button").count() == 0)
+    thumb.click()
+    page.wait_for_function("document.querySelector('#evidenceViewerStatus').textContent === ''", timeout=10000)
+    check("docente amplía la foto", page.locator("#evidenceViewerImage").is_visible())
+    page.click("#evidenceViewer [data-close-dialog]")
+    open_stats(page)
+    pick_period(page, "hoy")
+    check("estadísticas marcan 'Con foto'", "Con foto" in page.inner_text("#statsList"))
+    page.click("#statsDialog [data-close-dialog]")
+
+    # Función caída: la miniatura muestra error y permite reintentar.
+    page.evaluate("window.__MOCK.functionDown = true")
+    page.click("#logoutButton")
+    page.wait_for_selector("#loginView:not([hidden])")
+    page.fill("#emailInput", "x@y.co")
+    page.fill("#passwordInput", "12345678")
+    page.click("#loginButton")
+    page.wait_for_selector("#appView:not([hidden])")
+    open_student_events(page, "Ñusta")
+    thumb = page.locator(f".evidence-thumb[data-record-id='{edge_today}']")
+    expect(thumb).to_have_attribute("data-state", "error", timeout=10000)
+    check("al cerrar sesión se vacía la caché y un fallo muestra 'Reintentar'", True)
+    page.evaluate("window.__MOCK.functionDown = false")
+    thumb.click()
+    expect(thumb).to_have_attribute("data-state", "ready", timeout=10000)
+    check("reintento de miniatura funciona", True)
+    context.close()
+
+    # Usuario inactivo: no entra al panel.
+    context = browser.new_context(timezone_id="Asia/Tokyo", locale="es-CO")
+    context.route("https://www.gstatic.com/firebasejs/**", lambda route: route.fulfill(status=200, content_type="text/javascript", body=MOCK_JS))
+    page = context.new_page()
+    page.add_init_script(init_script(shared_db, "uid-inactivo", EVIDENCE_MOCK))
+    page.goto(f"http://127.0.0.1:{PORT}/index.html")
+    page.wait_for_function("!document.querySelector('#loginError').hidden", timeout=10000)
+    check("cuenta inactiva no accede (ni a fotos ni a estadísticas)", page.locator("#appView").is_hidden()
+          and "perfil activo" in page.inner_text("#loginError"))
+    context.close()
+
+    # Móvil: botón de cámara y diseño.
+    context, page, errors = new_page(browser, shared_db, "uid-directivo", viewport={"width": 390, "height": 844}, extra=EVIDENCE_MOCK + restore)
+    open_student_events(page, "Ñusta")
+    thumb = page.locator(f".evidence-thumb[data-record-id='{edge_today}']")
+    thumb.scroll_into_view_if_needed()
+    expect(thumb).to_have_attribute("data-state", "ready", timeout=10000)
+    page.screenshot(path=str(OUT / "evidence-row-mobile.png"))
+    page.locator(".late-event .small-button").first.click()
+    check("móvil: botón 'Tomar foto' visible", page.locator("#evidenceCameraButton").is_visible())
+    check("móvil: la cámara usa capture=environment", page.get_attribute("#evidenceCameraInput", "capture") == "environment")
+    page.wait_for_function("!document.querySelector('#evidencePreview').hidden", timeout=10000)
+    page.locator(".evidence-editor").scroll_into_view_if_needed()
+    page.screenshot(path=str(OUT / "evidence-editor-mobile.png"))
+    check("móvil: sin desbordamiento horizontal",
+          page.evaluate("document.querySelector('#excuseDialog').scrollWidth <= document.querySelector('#excuseDialog').clientWidth + 1"))
+    context.close()
+
+
 def main():
     selected = set(sys.argv[1:]) or {"stats", "export", "evidence"}
     db = fixture.build()

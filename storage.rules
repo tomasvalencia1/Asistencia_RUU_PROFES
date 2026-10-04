@@ -1,0 +1,14 @@
+rules_version = '2';
+
+// Las fotos de evidencia son datos de menores (pueden ser documentos médicos).
+// Ningún navegador las lee ni las escribe directamente: todo pasa por la Cloud
+// Function `evidencias`, que verifica en Realtime Database que la cuenta esté
+// activa y tenga el rol adecuado en cada solicitud. Firebase Admin (usado por
+// la función) no está sujeto a estas reglas.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

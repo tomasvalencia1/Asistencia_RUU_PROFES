@@ -34,6 +34,14 @@ import { firebaseConfig } from "./firebase-config.js";
 import { normalizeLateEvents } from "./query.js";
 import { createStatsView } from "./stats.js";
 import { exportToXlsx } from "./export-xlsx.js";
+import {
+  EvidenceError,
+  createEvidenceClient,
+  createThumbnailLoader,
+  evidenceErrorMessage,
+  formatBytes,
+  prepareImage
+} from "./evidence.js";
 
 const firebaseApp = initializeApp(firebaseConfig);
 const auth = getAuth(firebaseApp);
@@ -42,6 +50,9 @@ const database = getDatabase(firebaseApp);
 // nunca privilegios de Firebase Admin ni credenciales de otros usuarios.
 const functions = getFunctions(firebaseApp, "us-central1");
 const manageUsersCallable = httpsCallable(functions, "manageUsers");
+// Fotos de evidencia: siempre a través de la función (ver functions/index.js).
+const evidenceClient = createEvidenceClient(httpsCallable(functions, "evidencias", { timeout: 90000 }));
+const thumbnailLoader = createThumbnailLoader(evidenceClient);
 
 const GROUPS = [];
 for (let grade = 6; grade <= 11; grade += 1) {
@@ -119,6 +130,21 @@ const elements = {
   excuseFormError: document.querySelector("#excuseFormError"),
   saveExcuseButton: document.querySelector("#saveExcuseButton"),
   deleteExcuseButton: document.querySelector("#deleteExcuseButton"),
+  evidenceDropZone: document.querySelector("#evidenceDropZone"),
+  evidencePreview: document.querySelector("#evidencePreview"),
+  evidenceDropText: document.querySelector("#evidenceDropText"),
+  evidenceCameraButton: document.querySelector("#evidenceCameraButton"),
+  evidenceFileButton: document.querySelector("#evidenceFileButton"),
+  evidenceRetryButton: document.querySelector("#evidenceRetryButton"),
+  evidenceRemoveButton: document.querySelector("#evidenceRemoveButton"),
+  evidenceStatus: document.querySelector("#evidenceStatus"),
+  evidenceCameraInput: document.querySelector("#evidenceCameraInput"),
+  evidenceFileInput: document.querySelector("#evidenceFileInput"),
+  evidenceViewer: document.querySelector("#evidenceViewer"),
+  evidenceViewerTitle: document.querySelector("#evidenceViewerTitle"),
+  evidenceViewerImage: document.querySelector("#evidenceViewerImage"),
+  evidenceViewerStatus: document.querySelector("#evidenceViewerStatus"),
+  evidenceViewerRetry: document.querySelector("#evidenceViewerRetry"),
   userAdminDialog: document.querySelector("#userAdminDialog"),
   userForm: document.querySelector("#userForm"),
   userFormTitle: document.querySelector("#userFormTitle"),
@@ -146,6 +172,9 @@ const state = {
   sessionId: 0,
   studentUnsubscribe: null,
   recordUnsubscribe: null,
+  evidence: {},
+  evidenceUnsubscribe: null,
+  evidenceEditor: null,
   editingRecordId: null,
   managedUsers: [],
   editingUserUid: null
@@ -239,6 +268,8 @@ function showUserFormError(message) {
 function showLogin() {
   closeDialog(elements.userAdminDialog);
   closeDialog(elements.statsDialog);
+  closeDialog(elements.excuseDialog);
+  closeDialog(elements.evidenceViewer);
   elements.appView.hidden = true;
   elements.loginView.hidden = false;
   elements.passwordInput.value = "";
@@ -261,8 +292,10 @@ function showApp() {
 function detachDatabaseListeners() {
   if (state.studentUnsubscribe) state.studentUnsubscribe();
   if (state.recordUnsubscribe) state.recordUnsubscribe();
+  if (state.evidenceUnsubscribe) state.evidenceUnsubscribe();
   state.studentUnsubscribe = null;
   state.recordUnsubscribe = null;
+  state.evidenceUnsubscribe = null;
 }
 
 function profileErrorMessage(error) {
@@ -312,6 +345,21 @@ function subscribeToData() {
     },
     () => {
       setStatus("No fue posible leer tardanzas. Revisa tu conexión o las reglas de Firebase.", true);
+    }
+  );
+
+  // Sólo metadatos (versión, tamaño, quién subió). Las imágenes se piden a la función.
+  state.evidenceUnsubscribe = onValue(
+    ref(database, "evidencias"),
+    (snapshot) => {
+      state.evidence = snapshot.val() || {};
+      render();
+      if (state.evidenceEditor && !state.evidenceEditor.busy) renderEvidenceEditor();
+    },
+    (error) => {
+      // Ocurre si aún no se publicaron las reglas nuevas: el panel sigue funcionando sin fotos.
+      console.warn("No fue posible leer los metadatos de evidencias", error);
+      state.evidence = {};
     }
   );
 }
@@ -483,6 +531,26 @@ function excusePresentation(justification) {
   };
 }
 
+function renderEvidenceThumb(event, student, evidence) {
+  const button = createElement("button", "evidence-thumb");
+  button.type = "button";
+  button.dataset.recordId = event.id;
+  button.dataset.version = String(evidence.version);
+  button.setAttribute("aria-label", "Ver foto de evidencia de " + student.name + " (" + event.exactDate + ")");
+  const image = createElement("img");
+  image.alt = "";
+  button.append(image);
+  button.addEventListener("click", () => {
+    if (button.dataset.state === "error") {
+      thumbnailLoader.fill(button);
+      return;
+    }
+    openEvidenceViewer(event.id, evidence.version, student.name + " · " + event.exactDate);
+  });
+  thumbnailLoader.observe(button);
+  return button;
+}
+
 function renderEvents(student) {
   const column = createElement("section", "events-column");
   column.append(createElement("span", "field-label events-heading", "Llegadas tarde por mes"));
@@ -515,8 +583,14 @@ function renderEvents(student) {
         const date = createElement("span", "event-date", event.exactDate);
         const excuse = excusePresentation(event.justification);
         const excuseArea = createElement("div", "event-excuse");
-        excuseArea.append(createElement("span", "state-pill state-" + excuse.state, excuse.label));
-        excuseArea.append(createElement("p", "", excuse.detail));
+        const excuseText = createElement("div", "event-excuse-text");
+        excuseText.append(createElement("span", "state-pill state-" + excuse.state, excuse.label));
+        excuseText.append(createElement("p", "", excuse.detail));
+        excuseArea.append(excuseText);
+        const evidence = event.justification ? state.evidence[event.id] : null;
+        if (evidence && evidence.version) {
+          excuseArea.append(renderEvidenceThumb(event, student, evidence));
+        }
         eventRow.append(date, excuseArea);
 
         if (canManage()) {
@@ -656,6 +730,7 @@ function openExcuseDialog(event, student) {
   elements.excuseReasonInput.value = text(justification.motivo);
   elements.deleteExcuseButton.hidden = !event.justification;
   showExcuseFormError("");
+  openEvidenceEditor(event);
   openDialog(elements.excuseDialog);
   elements.excuseReasonInput.focus();
 }
@@ -755,25 +830,37 @@ async function saveExcuse(event) {
     return;
   }
 
+  const editor = state.evidenceEditor;
+  const previous = editor && editor.justification;
+  // Si sólo cambió la foto, no se reescribe la excusa (conserva quién y cuándo la revisó).
+  const excuseChanged = !previous || text(previous.estado) !== status || text(previous.motivo) !== reason;
+
   elements.saveExcuseButton.disabled = true;
   showExcuseFormError("");
   try {
-    await update(ref(database, "registros/" + state.editingRecordId), {
-      justificacion: {
-        estado: status,
-        motivo: reason,
-        revisadaPorUid: state.authUser.uid,
-        revisadaEn: Date.now()
-      }
-    });
-    closeDialog(elements.excuseDialog);
-    setStatus("Excusa actualizada.", false);
+    if (excuseChanged) {
+      await update(ref(database, "registros/" + state.editingRecordId), {
+        justificacion: {
+          estado: status,
+          motivo: reason,
+          revisadaPorUid: state.authUser.uid,
+          revisadaEn: Date.now()
+        }
+      });
+      if (editor) editor.justification = { estado: status, motivo: reason };
+    }
   } catch (error) {
     console.error("No fue posible guardar excusa", error);
     showExcuseFormError("No se pudo guardar la revisión. Verifica que tu rol sea Directivo o Administrador.");
-  } finally {
     elements.saveExcuseButton.disabled = false;
+    return;
   }
+
+  const uploaded = editor && editor.pending ? await uploadPendingEvidence() : true;
+  elements.saveExcuseButton.disabled = false;
+  if (!uploaded) return;
+  closeDialog(elements.excuseDialog);
+  setStatus(editor && editor.uploadedNow ? "Excusa y foto guardadas." : "Excusa actualizada.", false);
 }
 
 async function deleteExcuse() {
@@ -782,15 +869,209 @@ async function deleteExcuse() {
 
   elements.deleteExcuseButton.disabled = true;
   try {
+    // Primero la foto: así nunca queda una evidencia huérfana sin excusa.
+    if (state.evidence[state.editingRecordId]) {
+      await evidenceClient.remove(state.editingRecordId);
+    }
     await remove(ref(database, "registros/" + state.editingRecordId + "/justificacion"));
     closeDialog(elements.excuseDialog);
     setStatus("Excusa retirada.", false);
   } catch (error) {
     console.error("No fue posible quitar excusa", error);
-    showExcuseFormError("No se pudo quitar la excusa. Inténtalo de nuevo.");
+    showExcuseFormError(
+      String(error && error.code || "").startsWith("functions/")
+        ? "No se pudo quitar la foto adjunta, así que la excusa se conservó. " + evidenceErrorMessage(error)
+        : "No se pudo quitar la excusa. Inténtalo de nuevo."
+    );
   } finally {
     elements.deleteExcuseButton.disabled = false;
   }
+}
+
+/* ---------- Foto de evidencia en el diálogo de excusa (sólo directivo y admin) ---------- */
+
+function setEvidenceStatus(message, kind) {
+  elements.evidenceStatus.textContent = message || "";
+  elements.evidenceStatus.dataset.kind = kind || "";
+}
+
+function discardPendingEvidence(editor) {
+  if (editor && editor.pendingUrl) URL.revokeObjectURL(editor.pendingUrl);
+  if (editor) {
+    editor.pending = null;
+    editor.pendingUrl = "";
+    editor.failed = false;
+  }
+}
+
+function renderEvidenceEditor() {
+  const editor = state.evidenceEditor;
+  if (!editor) return;
+  const existing = state.evidence[editor.recordId] || null;
+  const hasPhoto = Boolean(editor.pending || existing);
+
+  elements.evidenceFileButton.textContent = hasPhoto ? "Reemplazar foto" : "Elegir archivo";
+  elements.evidenceCameraButton.textContent = hasPhoto ? "Tomar otra foto" : "Tomar foto";
+  elements.evidenceRemoveButton.hidden = !hasPhoto;
+  elements.evidenceRemoveButton.textContent = editor.pending ? "Descartar foto nueva" : "Quitar foto";
+  elements.evidenceRetryButton.hidden = !editor.failed;
+  [elements.evidenceFileButton, elements.evidenceCameraButton, elements.evidenceRemoveButton, elements.evidenceRetryButton]
+    .forEach((button) => { button.disabled = editor.busy; });
+  elements.evidenceDropZone.classList.toggle("has-photo", hasPhoto);
+  elements.evidenceDropText.hidden = hasPhoto;
+
+  if (editor.pending) {
+    elements.evidencePreview.src = editor.pendingUrl;
+    elements.evidencePreview.hidden = false;
+  } else if (existing) {
+    const requested = editor.recordId + ":" + existing.version;
+    elements.evidencePreview.dataset.requested = requested;
+    elements.evidencePreview.hidden = true;
+    evidenceClient.load(editor.recordId, existing.version, "mini")
+      .then((url) => {
+        if (elements.evidencePreview.dataset.requested !== requested || state.evidenceEditor !== editor || editor.pending) return;
+        elements.evidencePreview.src = url;
+        elements.evidencePreview.hidden = false;
+      })
+      .catch((error) => {
+        if (state.evidenceEditor === editor && !editor.busy) setEvidenceStatus(evidenceErrorMessage(error), "error");
+      });
+  } else {
+    elements.evidencePreview.hidden = true;
+    elements.evidencePreview.removeAttribute("src");
+  }
+}
+
+function openEvidenceEditor(event) {
+  discardPendingEvidence(state.evidenceEditor);
+  state.evidenceEditor = {
+    recordId: event.id,
+    justification: event.justification ? { estado: event.justification.estado, motivo: event.justification.motivo } : null,
+    pending: null,
+    pendingUrl: "",
+    busy: false,
+    failed: false,
+    uploadedNow: false
+  };
+  const existing = state.evidence[event.id];
+  setEvidenceStatus(existing ? "Foto adjunta. Puedes reemplazarla o quitarla." : "", "");
+  elements.evidenceCameraButton.hidden = !window.matchMedia("(pointer: coarse)").matches;
+  renderEvidenceEditor();
+}
+
+async function handleEvidenceFile(file) {
+  const editor = state.evidenceEditor;
+  if (!editor || editor.busy || !file || !canManage()) return;
+  editor.busy = true;
+  renderEvidenceEditor();
+  setEvidenceStatus("Preparando la foto…", "busy");
+  try {
+    const prepared = await prepareImage(file);
+    if (state.evidenceEditor !== editor) return;
+    discardPendingEvidence(editor);
+    editor.pending = prepared;
+    editor.pendingUrl = URL.createObjectURL(prepared.full);
+    setEvidenceStatus(
+      "Foto lista (" + formatBytes(prepared.full.size) + "). Se subirá al pulsar “Guardar revisión”.",
+      "ready"
+    );
+  } catch (error) {
+    // Un archivo no válido es un error del usuario, no de la aplicación: sólo se le informa.
+    if (!(error instanceof EvidenceError)) console.error("No fue posible preparar la foto", error);
+    setEvidenceStatus(evidenceErrorMessage(error), "error");
+  } finally {
+    editor.busy = false;
+    renderEvidenceEditor();
+  }
+}
+
+async function uploadPendingEvidence() {
+  const editor = state.evidenceEditor;
+  if (!editor || !editor.pending) return true;
+  editor.busy = true;
+  editor.failed = false;
+  renderEvidenceEditor();
+  setEvidenceStatus("Subiendo foto… con conexión lenta puede tardar un poco.", "busy");
+  try {
+    await evidenceClient.upload(editor.recordId, editor.pending);
+    discardPendingEvidence(editor);
+    editor.uploadedNow = true;
+    setEvidenceStatus("Foto guardada.", "ready");
+    return true;
+  } catch (error) {
+    console.error("No fue posible subir la foto", error);
+    editor.failed = true;
+    setEvidenceStatus("La excusa quedó guardada, pero la foto no se pudo subir. " + evidenceErrorMessage(error), "error");
+    return false;
+  } finally {
+    editor.busy = false;
+    renderEvidenceEditor();
+  }
+}
+
+async function removeEvidence() {
+  const editor = state.evidenceEditor;
+  if (!editor || editor.busy || !canManage()) return;
+  if (editor.pending) {
+    discardPendingEvidence(editor);
+    setEvidenceStatus(state.evidence[editor.recordId] ? "Se conserva la foto anterior." : "", "");
+    renderEvidenceEditor();
+    return;
+  }
+  if (!window.confirm("¿Quitar la foto de evidencia? Se borrará de forma permanente.")) return;
+  editor.busy = true;
+  renderEvidenceEditor();
+  setEvidenceStatus("Quitando la foto…", "busy");
+  try {
+    await evidenceClient.remove(editor.recordId);
+    delete state.evidence[editor.recordId];
+    setEvidenceStatus("Foto quitada.", "ready");
+    render();
+  } catch (error) {
+    console.error("No fue posible quitar la foto", error);
+    setEvidenceStatus(evidenceErrorMessage(error), "error");
+  } finally {
+    editor.busy = false;
+    renderEvidenceEditor();
+  }
+}
+
+/* ---------- Visor ampliado (todos los roles) ---------- */
+
+let viewerRequest = 0;
+
+function openEvidenceViewer(recordId, version, caption) {
+  const requestId = viewerRequest + 1;
+  viewerRequest = requestId;
+  elements.evidenceViewerTitle.textContent = caption;
+  elements.evidenceViewerImage.hidden = true;
+  elements.evidenceViewerImage.removeAttribute("src");
+  elements.evidenceViewerRetry.hidden = true;
+  elements.evidenceViewerStatus.classList.remove("error");
+  elements.evidenceViewerStatus.textContent = "Cargando la foto…";
+  elements.evidenceViewerRetry.onclick = () => openEvidenceViewer(recordId, version, caption);
+  openDialog(elements.evidenceViewer);
+
+  // Primero la miniatura (normalmente ya está en memoria) y luego la versión completa.
+  evidenceClient.load(recordId, version, "mini").then((url) => {
+    if (viewerRequest !== requestId || !elements.evidenceViewerImage.hidden) return;
+    elements.evidenceViewerImage.src = url;
+    elements.evidenceViewerImage.hidden = false;
+  }, () => undefined);
+  evidenceClient.load(recordId, version, "completa")
+    .then((url) => {
+      if (viewerRequest !== requestId) return;
+      elements.evidenceViewerImage.src = url;
+      elements.evidenceViewerImage.hidden = false;
+      elements.evidenceViewerStatus.textContent = "";
+    })
+    .catch((error) => {
+      if (viewerRequest !== requestId) return;
+      console.error("No fue posible cargar la foto", error);
+      elements.evidenceViewerStatus.classList.add("error");
+      elements.evidenceViewerStatus.textContent = evidenceErrorMessage(error);
+      elements.evidenceViewerRetry.hidden = false;
+    });
 }
 
 function setManagedUsersStatus(message, isError) {
@@ -1012,6 +1293,54 @@ elements.statsButton.addEventListener("click", () => {
 elements.studentForm.addEventListener("submit", saveStudent);
 elements.excuseForm.addEventListener("submit", saveExcuse);
 elements.deleteExcuseButton.addEventListener("click", deleteExcuse);
+elements.evidenceFileButton.addEventListener("click", () => elements.evidenceFileInput.click());
+elements.evidenceCameraButton.addEventListener("click", () => elements.evidenceCameraInput.click());
+[elements.evidenceFileInput, elements.evidenceCameraInput].forEach((input) => {
+  input.addEventListener("change", () => {
+    const file = input.files && input.files[0];
+    input.value = "";
+    handleEvidenceFile(file);
+  });
+});
+elements.evidenceRemoveButton.addEventListener("click", removeEvidence);
+elements.evidenceRetryButton.addEventListener("click", async () => {
+  if (await uploadPendingEvidence()) {
+    closeDialog(elements.excuseDialog);
+    setStatus("Excusa y foto guardadas.", false);
+  }
+});
+elements.evidenceDropZone.addEventListener("click", () => {
+  if (state.evidenceEditor && !state.evidenceEditor.busy) elements.evidenceFileInput.click();
+});
+elements.evidenceDropZone.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    elements.evidenceDropZone.click();
+  }
+});
+["dragenter", "dragover"].forEach((type) => {
+  elements.evidenceDropZone.addEventListener(type, (event) => {
+    event.preventDefault();
+    elements.evidenceDropZone.classList.add("is-dragging");
+  });
+});
+["dragleave", "drop"].forEach((type) => {
+  elements.evidenceDropZone.addEventListener(type, () => elements.evidenceDropZone.classList.remove("is-dragging"));
+});
+elements.evidenceDropZone.addEventListener("drop", (event) => {
+  event.preventDefault();
+  const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+  handleEvidenceFile(file);
+});
+elements.excuseDialog.addEventListener("close", () => {
+  discardPendingEvidence(state.evidenceEditor);
+  state.evidenceEditor = null;
+  elements.evidencePreview.removeAttribute("src");
+});
+elements.evidenceViewer.addEventListener("close", () => {
+  viewerRequest += 1;
+  elements.evidenceViewerImage.removeAttribute("src");
+});
 elements.userForm.addEventListener("submit", saveManagedUser);
 elements.cancelUserEditButton.addEventListener("click", resetUserForm);
 elements.refreshUsersButton.addEventListener("click", loadManagedUsers);
@@ -1024,7 +1353,7 @@ document.querySelectorAll("[data-close-dialog]").forEach((button) => {
 
 // Vista de estadísticas compartida por todos los roles: sólo consulta datos ya cargados.
 const statsView = createStatsView({
-  getEvents: () => normalizeLateEvents(state.records, state.students, {}),
+  getEvents: () => normalizeLateEvents(state.records, state.students, state.evidence),
   onExport: (result, range, filters) => exportToXlsx(
     result,
     range,
@@ -1043,6 +1372,8 @@ onAuthStateChanged(auth, async (user) => {
   detachDatabaseListeners();
   state.students = {};
   state.records = {};
+  state.evidence = {};
+  evidenceClient.clear();
   state.authUser = null;
   state.profile = null;
   state.editingRecordId = null;

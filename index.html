@@ -150,6 +150,25 @@
         <span>Motivo de la llegada tarde o excusa</span>
         <textarea id="excuseReasonInput" name="motivo" rows="5" maxlength="500" required placeholder="Ejemplo: cita médica, transporte escolar, explicación entregada por acudiente"></textarea>
       </label>
+      <section class="evidence-editor" aria-labelledby="evidenceEditorTitle">
+        <div class="evidence-editor-heading">
+          <span id="evidenceEditorTitle">Foto de evidencia (opcional)</span>
+          <small>Se comprime antes de subir · sólo la ve el personal con sesión activa</small>
+        </div>
+        <div id="evidenceDropZone" class="evidence-drop" tabindex="0" role="button" aria-describedby="evidenceDropText">
+          <img id="evidencePreview" class="evidence-preview" alt="Vista previa de la foto de evidencia" hidden>
+          <p id="evidenceDropText">Arrastra aquí una foto o usa los botones.</p>
+        </div>
+        <div class="evidence-actions">
+          <button id="evidenceCameraButton" class="small-button" type="button" hidden>Tomar foto</button>
+          <button id="evidenceFileButton" class="small-button" type="button">Elegir archivo</button>
+          <button id="evidenceRetryButton" class="small-button" type="button" hidden>Reintentar subida</button>
+          <button id="evidenceRemoveButton" class="small-button danger" type="button" hidden>Quitar foto</button>
+        </div>
+        <p id="evidenceStatus" class="evidence-status" role="status" aria-live="polite"></p>
+        <input id="evidenceCameraInput" type="file" accept="image/*" capture="environment" hidden>
+        <input id="evidenceFileInput" type="file" accept="image/*,.heic,.heif" hidden>
+      </section>
       <p id="excuseFormError" class="form-error" role="alert" hidden></p>
       <div class="dialog-actions dialog-actions-spread">
         <button id="deleteExcuseButton" class="danger-button" type="button" hidden>Quitar excusa</button>
@@ -158,6 +177,25 @@
         <button id="saveExcuseButton" class="primary-button" type="submit">Guardar revisión</button>
       </div>
     </form>
+  </dialog>
+
+  <!-- Visor de fotos de evidencia: la imagen llega desde la Cloud Function y nunca tiene URL pública. -->
+  <dialog id="evidenceViewer" class="app-dialog evidence-viewer" aria-labelledby="evidenceViewerTitle">
+    <div class="evidence-viewer-content">
+      <div class="dialog-heading">
+        <div>
+          <p class="eyebrow">Foto de evidencia</p>
+          <h2 id="evidenceViewerTitle">—</h2>
+        </div>
+        <button class="icon-button" type="button" data-close-dialog="evidenceViewer" aria-label="Cerrar">×</button>
+      </div>
+      <div class="evidence-viewer-frame">
+        <img id="evidenceViewerImage" alt="Foto de evidencia de la excusa" hidden>
+        <p id="evidenceViewerStatus" class="sync-status" role="status" aria-live="polite"></p>
+        <button id="evidenceViewerRetry" class="small-button" type="button" hidden>Reintentar</button>
+      </div>
+      <p class="help-text">Documento de un menor de edad. Úsalo sólo para fines escolares y no lo compartas fuera de la institución.</p>
+    </div>
   </dialog>
 
   <!-- Disponible para todos los roles. Lee sólo los datos que el panel ya tiene cargados. -->
