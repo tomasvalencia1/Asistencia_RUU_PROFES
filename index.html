@@ -75,6 +75,7 @@
           <input id="searchInput" type="search" autocomplete="off" placeholder="Nombre, grupo o UID de la tarjeta">
         </label>
         <div class="button-row">
+          <button id="statsButton" class="secondary-button stats-button" type="button">Estadísticas y Excel</button>
           <button id="refreshButton" class="secondary-button" type="button">Actualizar</button>
           <button id="addStudentButton" class="primary-button" type="button" hidden>Añadir estudiante</button>
         </div>
@@ -157,6 +158,113 @@
         <button id="saveExcuseButton" class="primary-button" type="submit">Guardar revisión</button>
       </div>
     </form>
+  </dialog>
+
+  <!-- Disponible para todos los roles. Lee sólo los datos que el panel ya tiene cargados. -->
+  <dialog id="statsDialog" class="app-dialog app-dialog-wide stats-dialog" aria-labelledby="statsDialogTitle">
+    <div class="stats-content">
+      <div class="dialog-heading">
+        <div>
+          <p class="eyebrow">Consulta de llegadas tarde</p>
+          <h2 id="statsDialogTitle">Estadísticas y Excel</h2>
+        </div>
+        <button class="icon-button" type="button" data-close-dialog="statsDialog" aria-label="Cerrar">×</button>
+      </div>
+
+      <form id="statsForm" class="stats-form" novalidate>
+        <fieldset class="period-fieldset">
+          <legend>Periodo</legend>
+          <div class="period-chips">
+            <label class="chip"><input type="radio" name="statsPeriod" value="hoy" checked><span>Hoy</span></label>
+            <label class="chip"><input type="radio" name="statsPeriod" value="semana"><span>Esta semana</span></label>
+            <label class="chip"><input type="radio" name="statsPeriod" value="mes"><span>Este mes</span></label>
+            <label class="chip"><input type="radio" name="statsPeriod" value="mes-anterior"><span>Mes anterior</span></label>
+            <label class="chip"><input type="radio" name="statsPeriod" value="dia"><span>Otro día</span></label>
+            <label class="chip"><input type="radio" name="statsPeriod" value="semana-de"><span>Otra semana</span></label>
+            <label class="chip"><input type="radio" name="statsPeriod" value="mes-de"><span>Otro mes</span></label>
+          </div>
+          <div class="period-pickers">
+            <label id="statsDayField" class="filter-field" hidden>
+              <span>Día</span>
+              <input id="statsDayInput" type="date">
+            </label>
+            <label id="statsWeekField" class="filter-field" hidden>
+              <span>Cualquier día de la semana (lunes a domingo)</span>
+              <input id="statsWeekInput" type="date">
+            </label>
+            <label id="statsMonthField" class="filter-field" hidden>
+              <span>Mes</span>
+              <select id="statsMonthInput"></select>
+            </label>
+          </div>
+        </fieldset>
+
+        <div class="stats-filter-grid">
+          <label class="filter-field">
+            <span>Grupo</span>
+            <select id="statsGroupInput"></select>
+          </label>
+          <label class="filter-field">
+            <span>Franja</span>
+            <select id="statsFranjaInput"></select>
+          </label>
+          <label class="filter-field">
+            <span>Estado de la excusa</span>
+            <select id="statsExcuseInput"></select>
+          </label>
+          <label class="filter-field">
+            <span>Nombre del estudiante</span>
+            <input id="statsNameInput" type="search" autocomplete="off" placeholder="Ej.: Peña">
+          </label>
+        </div>
+        <div class="stats-form-actions">
+          <button id="statsResetButton" class="small-button" type="button">Limpiar filtros</button>
+        </div>
+      </form>
+
+      <p id="statsRangeLabel" class="record-info" role="status" aria-live="polite">—</p>
+
+      <section class="stats-cards" aria-label="Resumen del periodo">
+        <article class="summary-card"><span>Llegadas tarde</span><strong id="statsTotal">—</strong></article>
+        <article class="summary-card"><span>Estudiantes</span><strong id="statsStudents">—</strong></article>
+        <article class="summary-card"><span>Sin excusa</span><strong id="statsWithoutExcuse">—</strong></article>
+        <article class="summary-card"><span>Excusas validadas</span><strong id="statsValidated">—</strong></article>
+      </section>
+
+      <section class="stats-section" aria-labelledby="statsGroupsTitle">
+        <div class="stats-section-heading">
+          <h3 id="statsGroupsTitle">Por grupo</h3>
+          <label class="checkbox-field">
+            <input id="statsShowEmptyGroups" type="checkbox">
+            <span>Mostrar grupos en cero</span>
+          </label>
+        </div>
+        <div class="table-scroll">
+          <table class="stats-table">
+            <thead>
+              <tr>
+                <th scope="col">Grupo</th>
+                <th scope="col" class="numeric">Total</th>
+                <th scope="col" class="numeric">Sin excusa</th>
+                <th scope="col" class="numeric">Pendiente</th>
+                <th scope="col" class="numeric">Validada</th>
+                <th scope="col" class="numeric">Rechazada</th>
+                <th scope="col" class="numeric">Estudiantes</th>
+              </tr>
+            </thead>
+            <tbody id="statsGroupTableBody"></tbody>
+            <tfoot id="statsGroupTableFoot"></tfoot>
+          </table>
+        </div>
+      </section>
+
+      <section class="stats-section" aria-labelledby="statsListHeading">
+        <h3 id="statsListHeading">Listado</h3>
+        <ol id="statsList" class="stats-list"></ol>
+        <button id="statsMoreButton" class="small-button stats-more" type="button" hidden>Mostrar más</button>
+      </section>
+
+    </div>
   </dialog>
 
   <!-- Sólo se abre para el perfil Administrador. Las acciones se ejecutan en Cloud Functions. -->

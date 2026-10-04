@@ -1,0 +1,10 @@
+{
+  "name": "ieruu-panel-tests",
+  "private": true,
+  "type": "module",
+  "description": "Pruebas del panel. No forman parte de lo que se publica en Vercel.",
+  "scripts": {
+    "test:query": "node --test query.test.mjs",
+    "test:rules": "firebase emulators:exec --only database --project demo-ieruu \"node --test rules.test.mjs\""
+  }
+}

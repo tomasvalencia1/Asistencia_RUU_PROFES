@@ -31,6 +31,8 @@ import {
   httpsCallable
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-functions.js";
 import { firebaseConfig } from "./firebase-config.js";
+import { normalizeLateEvents } from "./query.js";
+import { createStatsView } from "./stats.js";
 
 const firebaseApp = initializeApp(firebaseConfig);
 const auth = getAuth(firebaseApp);
@@ -92,6 +94,8 @@ const elements = {
   lateRecordCount: document.querySelector("#lateRecordCount"),
   searchInput: document.querySelector("#searchInput"),
   refreshButton: document.querySelector("#refreshButton"),
+  statsButton: document.querySelector("#statsButton"),
+  statsDialog: document.querySelector("#statsDialog"),
   addStudentButton: document.querySelector("#addStudentButton"),
   syncStatus: document.querySelector("#syncStatus"),
   dataWarning: document.querySelector("#dataWarning"),
@@ -233,6 +237,7 @@ function showUserFormError(message) {
 
 function showLogin() {
   closeDialog(elements.userAdminDialog);
+  closeDialog(elements.statsDialog);
   elements.appView.hidden = true;
   elements.loginView.hidden = false;
   elements.passwordInput.value = "";
@@ -610,6 +615,7 @@ function render() {
   renderWarning(rows);
   renderTabs(rows);
   renderGroup(rows);
+  statsView.refresh();
 }
 
 function populateStudentGroups() {
@@ -999,6 +1005,9 @@ elements.searchInput.addEventListener("input", (event) => {
 });
 elements.refreshButton.addEventListener("click", refreshData);
 elements.addStudentButton.addEventListener("click", openStudentDialog);
+elements.statsButton.addEventListener("click", () => {
+  if (isActiveStaff(state.profile)) statsView.open();
+});
 elements.studentForm.addEventListener("submit", saveStudent);
 elements.excuseForm.addEventListener("submit", saveExcuse);
 elements.deleteExcuseButton.addEventListener("click", deleteExcuse);
@@ -1010,6 +1019,11 @@ document.querySelectorAll("[data-close-dialog]").forEach((button) => {
     const dialog = document.querySelector("#" + button.dataset.closeDialog);
     if (dialog) closeDialog(dialog);
   });
+});
+
+// Vista de estadísticas compartida por todos los roles: sólo consulta datos ya cargados.
+const statsView = createStatsView({
+  getEvents: () => normalizeLateEvents(state.records, state.students, {})
 });
 
 populateStudentGroups();
