@@ -5,6 +5,14 @@
   "description": "Pruebas del panel. No forman parte de lo que se publica en Vercel.",
   "scripts": {
     "test:query": "node --test query.test.mjs",
-    "test:rules": "firebase emulators:exec --only database --project demo-ieruu \"node --test rules.test.mjs\""
+    "test:functions": "node --test functions.test.cjs",
+    "test:rules": "firebase emulators:exec --only database --project demo-ieruu \"node --test rules.test.mjs\"",
+    "test:ui": "python3 browser/run_ui_tests.py",
+    "test": "npm run test:query && npm run test:functions && npm run test:rules"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "5.0.2",
+    "firebase": "12.19.0",
+    "firebase-tools": "15.32.1"
   }
 }
