@@ -12,8 +12,10 @@
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
 import {
+  browserSessionPersistence,
   getAuth,
   onAuthStateChanged,
+  setPersistence,
   signInWithEmailAndPassword,
   signOut
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js";
@@ -31,7 +33,7 @@ import {
   httpsCallable
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-functions.js";
 import { firebaseConfig } from "./firebase-config.js";
-import { normalizeLateEvents } from "./query.js";
+import { normalizeLateEvents, todayKey } from "./query.js";
 import { createStatsView } from "./stats.js";
 import { exportToXlsx } from "./export-xlsx.js";
 import {
@@ -162,20 +164,26 @@ const elements = {
   managedUsersContainer: document.querySelector("#managedUsersContainer")
 };
 
+const INACTIVITY_TIMEOUT_MS = 25 * 60 * 1000; // 25 minutos
+let inactivityTimer = null;
+
 const state = {
   authUser: null,
   profile: null,
   students: {},
   records: {},
+  faltas: {},
   activeGroup: GROUPS[0],
   search: "",
   sessionId: 0,
   studentUnsubscribe: null,
   recordUnsubscribe: null,
+  faltasUnsubscribe: null,
   evidence: {},
   evidenceUnsubscribe: null,
   evidenceEditor: null,
   editingRecordId: null,
+  editingFaltaKey: null,
   managedUsers: [],
   editingUserUid: null
 };
@@ -293,9 +301,11 @@ function detachDatabaseListeners() {
   if (state.studentUnsubscribe) state.studentUnsubscribe();
   if (state.recordUnsubscribe) state.recordUnsubscribe();
   if (state.evidenceUnsubscribe) state.evidenceUnsubscribe();
+  if (state.faltasUnsubscribe) state.faltasUnsubscribe();
   state.studentUnsubscribe = null;
   state.recordUnsubscribe = null;
   state.evidenceUnsubscribe = null;
+  state.faltasUnsubscribe = null;
 }
 
 function profileErrorMessage(error) {
@@ -360,6 +370,19 @@ function subscribeToData() {
       // Ocurre si aún no se publicaron las reglas nuevas: el panel sigue funcionando sin fotos.
       console.warn("No fue posible leer los metadatos de evidencias", error);
       state.evidence = {};
+    }
+  );
+
+  // Excusas de faltas (inasistencias). Si el nodo no existe aún, no bloquea el panel.
+  state.faltasUnsubscribe = onValue(
+    ref(database, "faltas"),
+    (snapshot) => {
+      state.faltas = snapshot.val() || {};
+      render();
+    },
+    (error) => {
+      console.warn("No fue posible leer las faltas", error);
+      state.faltas = {};
     }
   );
 }
@@ -684,12 +707,195 @@ function renderGroup(rows) {
   visibleMembers.forEach((student) => elements.studentsContainer.append(renderStudent(student, isSearching)));
 }
 
+/* ---------- Sistema de faltas (inasistencias) ---------- */
+
+function faltaKey(fecha, uid) {
+  return fecha + "_" + uid;
+}
+
+function computeAbsences() {
+  const today = todayKey();
+  // Recopilar UIDs de estudiantes que tienen CUALQUIER registro hoy (tarde o puntual)
+  const presentToday = new Set();
+  Object.values(state.records).forEach((record) => {
+    if (!record || typeof record !== "object") return;
+    if (text(record.fecha) === today && record.uid) {
+      presentToday.add(uidKey(record.uid));
+    }
+  });
+
+  return Object.entries(state.students)
+    .filter((entry) => entry[1] && typeof entry[1] === "object")
+    .map(([uid, student]) => {
+      const key = uidKey(uid);
+      return {
+        uid: key || text(uid).toUpperCase(),
+        name: text(student.nombre) || "Sin nombre",
+        group: normalizeGroup(student.grupo),
+        fecha: today,
+        present: presentToday.has(key),
+        faltaExcuse: state.faltas[faltaKey(today, key)] || null
+      };
+    })
+    .filter((student) => !student.present && student.group);
+}
+
+function renderFaltaExcuse(falta) {
+  if (!falta.faltaExcuse || !falta.faltaExcuse.justificacion) {
+    return { state: "empty", label: "Sin excusa", detail: "No se ha registrado motivo." };
+  }
+  const justification = falta.faltaExcuse.justificacion;
+  const stateName = text(justification.estado);
+  return {
+    state: EXCUSE_LABELS[stateName] ? stateName : "pendiente",
+    label: EXCUSE_LABELS[stateName] || "Pendiente",
+    detail: text(justification.motivo) || "Sin motivo escrito."
+  };
+}
+
+function renderAbsences() {
+  const container = document.querySelector("#faltasContainer");
+  const countEl = document.querySelector("#faltasCount");
+  if (!container || !countEl) return;
+
+  const allAbsences = computeAbsences();
+  const search = searchText(state.search);
+  const isSearching = Boolean(search);
+
+  const absences = (isSearching
+    ? allAbsences.filter((f) =>
+        searchText(f.name).includes(search) ||
+        searchText(f.group).includes(search) ||
+        searchText(f.uid).includes(search))
+    : allAbsences.filter((f) => f.group === state.activeGroup)
+  ).sort((a, b) => groupCollator.compare(a.name, b.name));
+
+  countEl.textContent = String(absences.length) + " falta" + (absences.length === 1 ? "" : "s") + " hoy";
+  container.replaceChildren();
+
+  if (!absences.length) {
+    const msg = isSearching
+      ? "No hay faltas que coincidan con la búsqueda."
+      : "Todos los estudiantes de este grupo tienen registro hoy, o aún no hay estudiantes.";
+    container.append(createElement("p", "events-empty", msg));
+    return;
+  }
+
+  absences.forEach((falta) => {
+    const card = createElement("article", "falta-card");
+    const identity = createElement("div", "falta-identity");
+    identity.append(createElement("h4", "falta-name", falta.name));
+    if (isSearching) identity.append(createElement("span", "falta-group", "Grupo " + falta.group));
+    identity.append(createElement("span", "uid-text", "UID: " + falta.uid));
+
+    const statusArea = createElement("div", "falta-status");
+    statusArea.append(createElement("span", "state-pill state-falta", "Falta"));
+    const excuse = renderFaltaExcuse(falta);
+    if (excuse.state !== "empty") {
+      statusArea.append(createElement("span", "state-pill state-" + excuse.state, excuse.label));
+      statusArea.append(createElement("p", "falta-reason", excuse.detail));
+    }
+
+    card.append(identity, statusArea);
+
+    if (canManage()) {
+      const actions = createElement("div", "falta-actions");
+      const excuseBtn = createElement("button", "small-button", falta.faltaExcuse ? "Editar excusa" : "Agregar excusa");
+      excuseBtn.type = "button";
+      excuseBtn.addEventListener("click", () => openFaltaExcuseDialog(falta));
+      actions.append(excuseBtn);
+      card.append(actions);
+    }
+
+    container.append(card);
+  });
+}
+
+function openFaltaExcuseDialog(falta) {
+  if (!canManage()) return;
+  const key = faltaKey(falta.fecha, falta.uid);
+  state.editingFaltaKey = key;
+  state.editingRecordId = null; // No es un registro de tardanza
+
+  const existing = falta.faltaExcuse && falta.faltaExcuse.justificacion;
+  elements.excuseRecordInfo.textContent =
+    falta.name + " · Grupo " + falta.group + " · Falta del " + falta.fecha;
+  elements.excuseStatusInput.value = existing && EXCUSE_LABELS[text(existing.estado)]
+    ? text(existing.estado)
+    : "pendiente";
+  elements.excuseReasonInput.value = existing ? text(existing.motivo) : "";
+  elements.deleteExcuseButton.hidden = !existing;
+  showExcuseFormError("");
+
+  // Desactivar evidencias para faltas (requiere plan pago)
+  const evidenceSection = document.querySelector("#evidenceSection");
+  if (evidenceSection) evidenceSection.hidden = true;
+
+  openDialog(elements.excuseDialog);
+  elements.excuseReasonInput.focus();
+}
+
+async function saveFaltaExcuse(status, reason) {
+  const key = state.editingFaltaKey;
+  if (!canManage() || !key) return false;
+
+  const parts = key.split("_");
+  const fecha = parts[0];
+  const uid = parts.slice(1).join("_");
+  const student = state.students[uid];
+
+  elements.saveExcuseButton.disabled = true;
+  showExcuseFormError("");
+  try {
+    await set(ref(database, "faltas/" + key), {
+      uid: uid,
+      nombre: text(student && student.nombre) || "Sin nombre",
+      grupo: normalizeGroup(student && student.grupo) || "",
+      fecha: fecha,
+      justificacion: {
+        estado: status,
+        motivo: reason,
+        revisadaPorUid: state.authUser.uid,
+        revisadaEn: Date.now()
+      }
+    });
+    closeDialog(elements.excuseDialog);
+    setStatus("Excusa de falta guardada.", false);
+    return true;
+  } catch (error) {
+    console.error("No fue posible guardar la excusa de falta", error);
+    showExcuseFormError("No se pudo guardar. Verifica tu rol y las reglas de Firebase.");
+    return false;
+  } finally {
+    elements.saveExcuseButton.disabled = false;
+  }
+}
+
+async function deleteFaltaExcuse() {
+  const key = state.editingFaltaKey;
+  if (!canManage() || !key) return;
+  if (!window.confirm("¿Quitar la excusa de esta falta?")) return;
+
+  elements.deleteExcuseButton.disabled = true;
+  try {
+    await remove(ref(database, "faltas/" + key));
+    closeDialog(elements.excuseDialog);
+    setStatus("Excusa de falta retirada.", false);
+  } catch (error) {
+    console.error("No fue posible quitar la excusa de falta", error);
+    showExcuseFormError("No se pudo quitar. Inténtalo de nuevo.");
+  } finally {
+    elements.deleteExcuseButton.disabled = false;
+  }
+}
+
 function render() {
   const rows = studentRows();
   renderSummary(rows);
   renderWarning(rows);
   renderTabs(rows);
   renderGroup(rows);
+  renderAbsences();
   statsView.refresh();
 }
 
@@ -721,6 +927,7 @@ function openExcuseDialog(event, student) {
   if (!canManage()) return;
 
   state.editingRecordId = event.id;
+  state.editingFaltaKey = null;
   const justification = event.justification || {};
   elements.excuseRecordInfo.textContent =
     student.name + " · Grupo " + student.group + " · " + event.exactDate;
@@ -817,7 +1024,7 @@ async function saveStudent(event) {
 
 async function saveExcuse(event) {
   event.preventDefault();
-  if (!canManage() || !state.editingRecordId) return;
+  if (!canManage()) return;
 
   const status = text(elements.excuseStatusInput.value);
   const reason = text(elements.excuseReasonInput.value);
@@ -826,9 +1033,17 @@ async function saveExcuse(event) {
     return;
   }
   if (!reason) {
-    showExcuseFormError("Escribe el motivo o la explicación de la tardanza.");
+    showExcuseFormError("Escribe el motivo o la explicación.");
     return;
   }
+
+  // Si se está editando una falta, usar el flujo de faltas.
+  if (state.editingFaltaKey && !state.editingRecordId) {
+    await saveFaltaExcuse(status, reason);
+    return;
+  }
+
+  if (!state.editingRecordId) return;
 
   const editor = state.evidenceEditor;
   const previous = editor && editor.justification;
@@ -864,7 +1079,15 @@ async function saveExcuse(event) {
 }
 
 async function deleteExcuse() {
-  if (!canManage() || !state.editingRecordId) return;
+  if (!canManage()) return;
+
+  // Si se está editando una falta, usar el flujo de faltas.
+  if (state.editingFaltaKey && !state.editingRecordId) {
+    await deleteFaltaExcuse();
+    return;
+  }
+
+  if (!state.editingRecordId) return;
   if (!window.confirm("¿Quitar esta excusa y su motivo?")) return;
 
   elements.deleteExcuseButton.disabled = true;
@@ -1366,19 +1589,46 @@ const statsView = createStatsView({
 populateStudentGroups();
 render();
 
+// Sesión sólo en la pestaña actual: al cerrar el navegador hay que volver a iniciar sesión.
+setPersistence(auth, browserSessionPersistence).catch((error) => {
+  console.warn("No se pudo configurar la persistencia de sesión", error);
+});
+
+/* ---------- Temporizador de inactividad (25 min) ---------- */
+
+function resetInactivityTimer() {
+  if (inactivityTimer) clearTimeout(inactivityTimer);
+  if (!state.authUser) return;
+  inactivityTimer = setTimeout(async () => {
+    if (state.authUser) {
+      window.alert("Tu sesión se cerró por inactividad (25 minutos). Vuelve a iniciar sesión.");
+      try { await signOut(auth); } catch (_) { /* se ignora */ }
+    }
+  }, INACTIVITY_TIMEOUT_MS);
+}
+
+["click", "keydown", "scroll", "touchstart", "mousemove"].forEach((type) => {
+  document.addEventListener(type, resetInactivityTimer, { passive: true });
+});
+
 onAuthStateChanged(auth, async (user) => {
   const sessionId = state.sessionId + 1;
   state.sessionId = sessionId;
   detachDatabaseListeners();
   state.students = {};
   state.records = {};
+  state.faltas = {};
   state.evidence = {};
   evidenceClient.clear();
   state.authUser = null;
   state.profile = null;
   state.editingRecordId = null;
+  state.editingFaltaKey = null;
   state.managedUsers = [];
   state.editingUserUid = null;
+
+  // Detener el timer si se cierra sesión.
+  if (inactivityTimer) clearTimeout(inactivityTimer);
 
   if (!user) {
     showLogin();
@@ -1406,6 +1656,7 @@ onAuthStateChanged(auth, async (user) => {
     render();
     setStatus("Conectando actualizaciones en vivo…", false);
     subscribeToData();
+    resetInactivityTimer();
   } catch (error) {
     if (sessionId !== state.sessionId) return;
     console.error("No fue posible cargar el perfil del usuario", error);

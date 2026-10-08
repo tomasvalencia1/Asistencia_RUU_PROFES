@@ -585,6 +585,31 @@ h2 { margin-bottom: 0; color: var(--navy); }
 .inactive-pill { color: #7a3a35; background: #ffebe9; }
 .managed-user-actions { display: flex; gap: 7px; flex-wrap: wrap; justify-content: flex-end; }
 
+/* ---------- Faltas (inasistencias) ---------- */
+.faltas-panel { border-top: 2px solid #ffe0d6; margin-top: 18px; padding-top: 14px; }
+.faltas-panel h2 { color: #a8351c; }
+.falta-card {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 18px;
+  border: 1px solid #ffe0d6;
+  border-radius: 12px;
+  background: #fff8f6;
+  margin-bottom: 8px;
+}
+.falta-identity { display: grid; gap: 2px; min-width: 0; }
+.falta-name { margin: 0; color: var(--ink); font-size: .95rem; font-weight: 700; }
+.falta-group { color: var(--muted); font-size: .82rem; }
+.falta-status { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.falta-reason { color: var(--muted); font-size: .82rem; margin: 0; }
+.falta-actions { display: flex; gap: 7px; flex-wrap: wrap; }
+.state-pill.state-falta { color: #a8351c; background: #ffe0d6; }
+@media (max-width: 800px) {
+  .falta-card { grid-template-columns: 1fr; gap: 8px; }
+}
+
 /* ---------- Estadísticas y Excel ---------- */
 .stats-button { white-space: nowrap; }
 .stats-dialog { width: min(100% - 28px, 980px); }
