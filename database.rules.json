@@ -69,6 +69,32 @@
     },
 
     "config": {
+      "diasSinClases": {
+        ".read": true,
+        "$periodoId": {
+          ".write": "auth != null && root.child('usuarios').child(auth.uid).child('activo').val() == true && (root.child('usuarios').child(auth.uid).child('rol').val() == 'directivo' || root.child('usuarios').child(auth.uid).child('rol').val() == 'admin')",
+          ".validate": "!newData.exists() || (newData.hasChildren(['desde', 'hasta', 'motivo', 'creadoPorUid', 'creadoEn']) && newData.child('desde').isString() && newData.child('desde').val().matches(/^20[0-9][0-9]-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$/) && newData.child('hasta').isString() && newData.child('hasta').val().matches(/^20[0-9][0-9]-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$/) && newData.child('hasta').val() >= newData.child('desde').val() && newData.child('motivo').isString() && newData.child('motivo').val().length > 0 && newData.child('motivo').val().length <= 120 && newData.child('creadoPorUid').isString() && newData.child('creadoPorUid').val() == auth.uid && newData.child('creadoEn').isNumber() && newData.child('creadoEn').val() <= now)",
+          "desde": {
+            ".validate": true
+          },
+          "hasta": {
+            ".validate": true
+          },
+          "motivo": {
+            ".validate": true
+          },
+          "creadoPorUid": {
+            ".validate": true
+          },
+          "creadoEn": {
+            ".validate": true
+          },
+          "$otro": {
+            ".validate": false
+          }
+        }
+      },
+
       "franjas": {
         ".read": true,
         ".write": "auth != null && root.child('usuarios').child(auth.uid).child('activo').val() == true && root.child('usuarios').child(auth.uid).child('rol').val() == 'admin'",

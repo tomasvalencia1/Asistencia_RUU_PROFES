@@ -23,6 +23,16 @@ Además, los tres roles pueden abrir **Informes y Excel** y ver las fotos de evi
 
 Los botones se ocultan para docentes y las reglas de Realtime Database también bloquean las escrituras aunque alguien intente usar las herramientas del navegador. Junto al nombre se muestra siempre el rol que inició sesión. Al iniciar sesión, la pantalla de acceso se oculta por completo.
 
+### Días sin clases (vacaciones, recesos, festivos)
+
+El botón **Días sin clases** abre un calendario. Directivo y administrador tocan el primer y el último día, escriben el motivo (por ejemplo «Semana de receso escolar») y guardan; los docentes sólo lo consultan. En esos días:
+
+- el panel no cuenta llegadas tarde ni marca faltas, y en «Hoy» muestra el motivo;
+- **Informes y Excel** tampoco cuentan esas llegadas tarde;
+- el lector Android (versión 4.1 o superior) muestra «Hoy no hay clases» con el motivo y no guarda las tarjetas que se acerquen.
+
+Se guarda en `config/diasSinClases/<id>` con `desde`, `hasta` (AAAA-MM-DD), `motivo`, `creadoPorUid` y `creadoEn`. Las reglas permiten leerlo a cualquiera (el lector no inicia sesión) y escribirlo sólo a directivo y administrador. Quitar un periodo hace que esos días vuelvan a contar.
+
 ### Excusas de faltas
 
 Directivo y administrador pueden agregar, editar o quitar la excusa de una falta desde la tarjeta «Faltas» de «Hoy». Se guarda en `faltas/<fecha>_<uid>` con `uid`, `nombre`, `grupo`, `fecha` y `justificacion` (igual que la de una llegada tarde). Las reglas de `faltas` validan además que la clave sea `<fecha>_<uid>`, que la excusa quede a nombre de quien la revisa y que no haya campos extra.

@@ -912,6 +912,113 @@ h2 { margin-bottom: 0; color: var(--navy); }
 .dialog-spacer { flex: 1 1 auto; }
 
 
+/* ---------- Días sin clases ---------- */
+.no-class-notice {
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid #c9d8f0;
+  border-radius: 12px;
+  color: #1f3f66;
+  background: #eaf2fd;
+  font-weight: 700;
+  line-height: 1.45;
+}
+.calendar-content { display: grid; gap: 16px; padding: 25px; }
+.calendar-content .record-info { margin: 0; }
+.calendar-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.calendar-picker { padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: white; }
+.calendar-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.calendar-nav h3 { margin: 0; color: var(--navy); font-size: 1.05rem; }
+.calendar-nav .icon-button { width: 44px; min-height: 44px; font-size: 1.5rem; }
+.calendar-weekdays, .calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.calendar-weekdays { margin-bottom: 4px; }
+.calendar-weekdays span { color: var(--muted); font-size: .75rem; font-weight: 800; text-align: center; }
+.calendar-day {
+  display: grid;
+  min-width: 0;
+  min-height: 42px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: var(--ink);
+  background: #f3f6f9;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+button.calendar-day:hover { border-color: #85abc9; background: white; }
+.calendar-day.weekend { color: #6b7a88; background: #fafbfc; }
+.calendar-day.outside { opacity: .4; }
+.calendar-day.today { border-color: var(--navy); box-shadow: inset 0 0 0 1px var(--navy); }
+.calendar-day.off { color: #6b3f00; background: repeating-linear-gradient(135deg, #ffe2b8 0 6px, #fff0d9 6px 12px); }
+.calendar-day.selected { color: white; background: #4a86c4; }
+.calendar-day.range-start, .calendar-day.range-end { background: var(--navy); }
+.calendar-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: .8rem;
+}
+.legend-item::before {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-right: 6px;
+  border-radius: 4px;
+  content: "";
+  vertical-align: -2px;
+}
+.legend-off::before { border: 1px solid #f0c98a; background: repeating-linear-gradient(135deg, #ffe2b8 0 4px, #fff0d9 4px 8px); }
+.legend-selected::before { background: var(--navy); }
+.legend-today::before { box-shadow: inset 0 0 0 2px var(--navy); }
+.calendar-form h3 { margin: 0; color: var(--navy); font-size: 1.05rem; }
+.date-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.calendar-summary { min-height: 1.2em; margin: 0; color: #2c4f73; font-size: .88rem; font-weight: 650; line-height: 1.4; }
+.calendar-periods h3 { margin: 0 0 8px; color: var(--navy); font-size: 1.05rem; }
+.calendar-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.calendar-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-left: 4px solid #e49b2f;
+  border-radius: 10px;
+  background: white;
+}
+.calendar-item.now { border-left-color: var(--navy); background: #f4f8fc; }
+.calendar-item.past { border-left-color: #b8c4cf; opacity: .75; }
+.calendar-item-info { display: grid; gap: 2px; min-width: 0; }
+.calendar-item-info strong { overflow-wrap: anywhere; }
+.calendar-item-info span { color: var(--muted); font-size: .84rem; }
+.calendar-item-actions { display: flex; flex: 0 0 auto; gap: 6px; }
+.calendar-empty { color: var(--muted); font-size: .9rem; }
+
+@media (max-width: 800px) {
+  .calendar-layout { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 560px) {
+  .calendar-content { padding: 18px 14px 24px; }
+  .calendar-picker { padding: 10px; }
+  .calendar-day { min-height: 40px; }
+  .calendar-item { align-items: flex-start; flex-direction: column; }
+}
+
 @media (max-width: 960px) {
   .group-picker { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }

@@ -60,6 +60,7 @@
           <input id="searchInput" type="search" autocomplete="off" placeholder="Buscar estudiante por nombre o tarjeta…">
         </label>
         <button id="statsButton" class="secondary-button stats-button" type="button">Informes y Excel</button>
+        <button id="calendarButton" class="secondary-button stats-button" type="button">Días sin clases</button>
       </section>
 
       <p id="syncStatus" class="sync-status" role="status" aria-live="polite">Conectando…</p>
@@ -82,7 +83,8 @@
 
         <section id="todaySection" class="today-section" aria-labelledby="todayTitle">
           <h3 id="todayTitle" class="today-title">Hoy</h3>
-          <div class="today-grid">
+          <p id="todayOffNotice" class="no-class-notice" hidden></p>
+          <div id="todayGrid" class="today-grid">
             <article class="today-card today-late" aria-labelledby="todayLateHeading">
               <h4 id="todayLateHeading">Llegaron tarde <span id="todayLateCount" class="count-pill">0</span></h4>
               <div id="todayLateList" class="today-list"></div>
@@ -318,6 +320,77 @@
         <p id="statsExportStatus" class="sync-status" role="status" aria-live="polite"></p>
       </section>
 
+    </div>
+  </dialog>
+
+  <!-- Días sin clases: todos los roles los ven; directivo y administrador los marcan o quitan. -->
+  <dialog id="calendarDialog" class="app-dialog app-dialog-wide" aria-labelledby="calendarDialogTitle">
+    <div class="calendar-content">
+      <div class="dialog-heading">
+        <div>
+          <p class="eyebrow">Calendario escolar</p>
+          <h2 id="calendarDialogTitle">Días sin clases</h2>
+        </div>
+        <button class="icon-button" type="button" data-close-dialog="calendarDialog" aria-label="Cerrar">×</button>
+      </div>
+      <p class="record-info">En los días marcados no se cuentan llegadas tarde ni faltas, y el lector de la puerta muestra que no hay clases. Úsalo para vacaciones, semanas de receso, festivos o jornadas sin estudiantes.</p>
+
+      <div class="calendar-layout">
+        <section class="calendar-picker" aria-labelledby="calendarMonthLabel">
+          <div class="calendar-nav">
+            <button id="calendarPrev" class="icon-button" type="button" aria-label="Mes anterior">‹</button>
+            <h3 id="calendarMonthLabel">—</h3>
+            <button id="calendarNext" class="icon-button" type="button" aria-label="Mes siguiente">›</button>
+          </div>
+          <div class="calendar-weekdays" aria-hidden="true">
+            <span>L</span><span>M</span><span>M</span><span>J</span><span>V</span><span>S</span><span>D</span>
+          </div>
+          <div id="calendarGrid" class="calendar-grid"></div>
+          <div class="calendar-legend" aria-hidden="true">
+            <span class="legend-item legend-off">Sin clases</span>
+            <span class="legend-item legend-selected">Selección</span>
+            <span class="legend-item legend-today">Hoy</span>
+          </div>
+        </section>
+
+        <form id="calendarForm" class="stack-form calendar-form" novalidate>
+          <h3>Marcar días sin clases</h3>
+          <p class="field-hint">Toca en el calendario el primer día y luego el último. Para un solo día, tócalo una vez.</p>
+          <div class="date-pair">
+            <label>
+              <span>Desde</span>
+              <input id="calendarFrom" type="date" required>
+            </label>
+            <label>
+              <span>Hasta</span>
+              <input id="calendarTo" type="date" required>
+            </label>
+          </div>
+          <label>
+            <span>Motivo</span>
+            <input id="calendarReason" type="text" list="calendarReasons" maxlength="120" required placeholder="Ej.: Semana de receso">
+          </label>
+          <datalist id="calendarReasons">
+            <option value="Vacaciones"></option>
+            <option value="Semana de receso escolar"></option>
+            <option value="Festivo"></option>
+            <option value="Jornada pedagógica (sin estudiantes)"></option>
+            <option value="Día de la familia"></option>
+            <option value="Suspensión de clases"></option>
+          </datalist>
+          <p id="calendarSummary" class="calendar-summary" role="status" aria-live="polite"></p>
+          <p id="calendarError" class="form-error" role="alert" hidden></p>
+          <div class="dialog-actions">
+            <button id="calendarClear" class="secondary-button" type="button">Limpiar</button>
+            <button id="calendarSave" class="primary-button" type="submit">Guardar días sin clases</button>
+          </div>
+        </form>
+      </div>
+
+      <section class="calendar-periods" aria-labelledby="calendarListTitle">
+        <h3 id="calendarListTitle">Días sin clases registrados</h3>
+        <ul id="calendarList" class="calendar-list"></ul>
+      </section>
     </div>
   </dialog>
 

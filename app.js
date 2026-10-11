@@ -39,13 +39,19 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-functions.js";
 import { firebaseConfig } from "./firebase-config.js";
 import {
+  addDays,
   bogotaParts,
+  dayNumber,
   formatDayLong,
+  formatMonth,
   franjaLabel,
   isDayKey,
   makeDayKey,
+  monthKeyOf,
   normalizeLateEvents,
-  todayKey
+  shiftMonth,
+  todayKey,
+  weekdayFromMonday
 } from "./query.js";
 import { createStatsView } from "./stats.js";
 import { exportToXlsx } from "./export-xlsx.js";
@@ -136,6 +142,23 @@ const elements = {
   todayTitle: document.querySelector("#todayTitle"),
   todayLateList: document.querySelector("#todayLateList"),
   todayLateCount: document.querySelector("#todayLateCount"),
+  todayOffNotice: document.querySelector("#todayOffNotice"),
+  todayGrid: document.querySelector("#todayGrid"),
+  calendarButton: document.querySelector("#calendarButton"),
+  calendarDialog: document.querySelector("#calendarDialog"),
+  calendarMonthLabel: document.querySelector("#calendarMonthLabel"),
+  calendarPrev: document.querySelector("#calendarPrev"),
+  calendarNext: document.querySelector("#calendarNext"),
+  calendarGrid: document.querySelector("#calendarGrid"),
+  calendarForm: document.querySelector("#calendarForm"),
+  calendarFrom: document.querySelector("#calendarFrom"),
+  calendarTo: document.querySelector("#calendarTo"),
+  calendarReason: document.querySelector("#calendarReason"),
+  calendarSummary: document.querySelector("#calendarSummary"),
+  calendarError: document.querySelector("#calendarError"),
+  calendarClear: document.querySelector("#calendarClear"),
+  calendarSave: document.querySelector("#calendarSave"),
+  calendarList: document.querySelector("#calendarList"),
   faltasContainer: document.querySelector("#faltasContainer"),
   faltasCount: document.querySelector("#faltasCount"),
   studentsHeading: document.querySelector("#studentsHeading"),
@@ -206,6 +229,10 @@ const state = {
   studentUnsubscribe: null,
   recordUnsubscribe: null,
   faltasUnsubscribe: null,
+  // Días sin clases (config/diasSinClases): no se cuentan llegadas tarde ni faltas.
+  noClassPeriods: {},
+  noClassUnsubscribe: null,
+  calendar: { month: "", start: "", end: "", notice: "" },
   evidence: {},
   evidenceUnsubscribe: null,
   evidenceEditor: null,
@@ -324,6 +351,7 @@ function showUserFormError(message) {
 function showLogin() {
   closeDialog(elements.userAdminDialog);
   closeDialog(elements.statsDialog);
+  closeDialog(elements.calendarDialog);
   closeDialog(elements.excuseDialog);
   closeDialog(elements.studentDialog);
   closeDialog(elements.evidenceViewer);
@@ -347,10 +375,12 @@ function detachDatabaseListeners() {
   if (state.recordUnsubscribe) state.recordUnsubscribe();
   if (state.evidenceUnsubscribe) state.evidenceUnsubscribe();
   if (state.faltasUnsubscribe) state.faltasUnsubscribe();
+  if (state.noClassUnsubscribe) state.noClassUnsubscribe();
   state.studentUnsubscribe = null;
   state.recordUnsubscribe = null;
   state.evidenceUnsubscribe = null;
   state.faltasUnsubscribe = null;
+  state.noClassUnsubscribe = null;
 }
 
 function profileErrorMessage(error) {
@@ -430,6 +460,252 @@ function subscribeToData() {
       state.faltas = {};
     }
   );
+
+  state.noClassUnsubscribe = onValue(
+    ref(database, "config/diasSinClases"),
+    (snapshot) => {
+      state.noClassPeriods = snapshot.val() || {};
+      render();
+      if (elements.calendarDialog.open) renderCalendar();
+    },
+    (error) => {
+      console.warn("No fue posible leer los días sin clases", error);
+      state.noClassPeriods = {};
+    }
+  );
+}
+
+/* ---------- Días sin clases ---------- */
+
+// Periodos válidos ordenados por fecha: { id, desde, hasta, motivo }.
+function noClassList() {
+  return Object.entries(state.noClassPeriods || {})
+    .map(([id, period]) => ({
+      id,
+      desde: text(period && period.desde),
+      hasta: text(period && period.hasta),
+      motivo: text(period && period.motivo) || "Sin clases"
+    }))
+    .filter((period) => isDayKey(period.desde) && isDayKey(period.hasta) && period.hasta >= period.desde)
+    .sort((first, second) => first.desde.localeCompare(second.desde));
+}
+
+// El periodo sin clases que incluye ese día (AAAA-MM-DD), o null.
+function noClassPeriodFor(day) {
+  if (!day) return null;
+  return noClassList().find((period) => day >= period.desde && day <= period.hasta) || null;
+}
+
+function dayCount(desde, hasta) {
+  return dayNumber(hasta) - dayNumber(desde) + 1;
+}
+
+// "Del lun 12 al vie 16 de oct de 2026", "Del lun 28 de sep al vie 2 de oct de 2026" o "jue 1 de oct de 2026".
+function periodLabel(period) {
+  const year = (day) => day.slice(0, 4);
+  if (period.desde === period.hasta) return shortDayLabel(period.desde) + " de " + year(period.desde);
+  const sameYear = year(period.desde) === year(period.hasta);
+  const sameMonth = sameYear && monthKeyOf(period.desde) === monthKeyOf(period.hasta);
+  const start = sameMonth
+    ? shortDayLabel(period.desde).replace(/ de [a-z]+$/, "")
+    : shortDayLabel(period.desde) + (sameYear ? "" : " de " + year(period.desde));
+  return "Del " + start + " al " + shortDayLabel(period.hasta) + " de " + year(period.hasta);
+}
+
+function showCalendarError(message) {
+  elements.calendarError.textContent = message;
+  elements.calendarError.hidden = !message;
+}
+
+function openCalendar() {
+  if (!state.calendar.month) state.calendar.month = monthKeyOf(todayKey());
+  showCalendarError("");
+  renderCalendar();
+  openDialog(elements.calendarDialog);
+}
+
+function moveCalendar(amount) {
+  state.calendar.month = shiftMonth(state.calendar.month || monthKeyOf(todayKey()), amount);
+  renderCalendar();
+}
+
+// Primer toque: inicio del rango. Segundo toque: fin (en cualquier orden). Un tercero empieza de nuevo.
+function selectCalendarDay(day) {
+  if (!canManage()) return;
+  const calendar = state.calendar;
+  if (!calendar.start || calendar.end) {
+    calendar.start = day;
+    calendar.end = "";
+  } else if (day < calendar.start) {
+    calendar.end = calendar.start;
+    calendar.start = day;
+  } else {
+    calendar.end = day;
+  }
+  calendar.notice = "";
+  showCalendarError("");
+  renderCalendar();
+  const again = [...elements.calendarGrid.children].find((cell) => cell.dataset.day === day);
+  if (again) again.focus();
+}
+
+function renderCalendar() {
+  const calendar = state.calendar;
+  const month = calendar.month || monthKeyOf(todayKey());
+  const today = todayKey();
+  const manager = canManage();
+  const from = calendar.start;
+  const to = calendar.end || calendar.start;
+
+  elements.calendarForm.hidden = !manager;
+  elements.calendarMonthLabel.textContent = formatMonth(month);
+  elements.calendarGrid.replaceChildren();
+
+  const first = month + "-01";
+  const gridStart = addDays(first, -weekdayFromMonday(first));
+  for (let index = 0; index < 42; index += 1) {
+    const day = addDays(gridStart, index);
+    // La sexta fila sólo se dibuja si todavía tiene días del mes.
+    if (index === 35 && monthKeyOf(day) !== month) break;
+    const off = noClassPeriodFor(day);
+    const selected = Boolean(from) && day >= from && day <= to;
+    const cell = createElement(manager ? "button" : "span", "calendar-day", String(Number(day.slice(8))));
+    cell.dataset.day = day;
+    if (monthKeyOf(day) !== month) cell.classList.add("outside");
+    if (weekdayFromMonday(day) >= 5) cell.classList.add("weekend");
+    if (day === today) cell.classList.add("today");
+    if (off) {
+      cell.classList.add("off");
+      cell.title = off.motivo;
+    }
+    if (selected) cell.classList.add("selected");
+    if (selected && day === from) cell.classList.add("range-start");
+    if (selected && day === to) cell.classList.add("range-end");
+    const label = formatDayLong(day) + (off ? ", sin clases: " + off.motivo : "") + (day === today ? ", hoy" : "");
+    if (manager) {
+      cell.type = "button";
+      cell.setAttribute("aria-pressed", String(selected));
+      cell.setAttribute("aria-label", label);
+      cell.addEventListener("click", () => selectCalendarDay(day));
+    } else {
+      cell.setAttribute("role", "img");
+      cell.setAttribute("aria-label", label);
+    }
+    elements.calendarGrid.append(cell);
+  }
+
+  elements.calendarFrom.value = from || "";
+  elements.calendarTo.value = from ? to : "";
+  if (from) {
+    const overlap = noClassList().some((period) => period.desde <= to && period.hasta >= from);
+    elements.calendarSummary.textContent = plural(dayCount(from, to), "día elegido", "días elegidos") + ": " +
+      periodLabel({ desde: from, hasta: to }) + (overlap ? ". Incluye días que ya estaban marcados." : ".");
+  } else {
+    elements.calendarSummary.textContent = calendar.notice || "Aún no has elegido días.";
+  }
+  renderNoClassList();
+}
+
+function renderNoClassList() {
+  const today = todayKey();
+  const list = noClassList();
+  elements.calendarList.replaceChildren();
+  if (!list.length) {
+    elements.calendarList.append(createElement("li", "calendar-empty", "No hay días sin clases registrados."));
+    return;
+  }
+  // Primero los que están en curso o vienen; después los pasados, del más reciente al más antiguo.
+  const upcoming = list.filter((period) => period.hasta >= today);
+  const past = list.filter((period) => period.hasta < today).reverse();
+  [...upcoming, ...past].forEach((period) => {
+    const isPast = period.hasta < today;
+    const isNow = period.desde <= today && today <= period.hasta;
+    const item = createElement("li", "calendar-item" + (isPast ? " past" : "") + (isNow ? " now" : ""));
+    const info = createElement("div", "calendar-item-info");
+    info.append(createElement("strong", "", period.motivo));
+    info.append(createElement(
+      "span",
+      "",
+      periodLabel(period) + " · " + plural(dayCount(period.desde, period.hasta), "día", "días") +
+        (isNow ? " · en curso" : isPast ? " · pasado" : "")
+    ));
+    const actions = createElement("div", "calendar-item-actions");
+    const show = createElement("button", "small-button", "Ver");
+    show.type = "button";
+    show.setAttribute("aria-label", "Ver en el calendario: " + period.motivo);
+    show.addEventListener("click", () => {
+      state.calendar.month = monthKeyOf(period.desde);
+      renderCalendar();
+    });
+    actions.append(show);
+    if (canManage()) {
+      const removeButton = createElement("button", "small-button danger", "Quitar");
+      removeButton.type = "button";
+      removeButton.setAttribute("aria-label", "Quitar " + period.motivo + " (" + periodLabel(period) + ")");
+      removeButton.addEventListener("click", () => removeNoClassPeriod(period));
+      actions.append(removeButton);
+    }
+    item.append(info, actions);
+    elements.calendarList.append(item);
+  });
+}
+
+async function saveNoClassPeriod(event) {
+  event.preventDefault();
+  if (!canManage()) return;
+  const desde = state.calendar.start;
+  const hasta = state.calendar.end || state.calendar.start;
+  const motivo = text(elements.calendarReason.value);
+  if (!isDayKey(desde) || !isDayKey(hasta)) {
+    showCalendarError("Elige en el calendario el primer y el último día.");
+    return;
+  }
+  if (!motivo) {
+    showCalendarError("Escribe el motivo, por ejemplo «Vacaciones».");
+    elements.calendarReason.focus();
+    return;
+  }
+  if (dayCount(desde, hasta) > 120) {
+    showCalendarError("Un periodo puede tener máximo 120 días. Divídelo en partes.");
+    return;
+  }
+
+  elements.calendarSave.disabled = true;
+  showCalendarError("");
+  try {
+    await set(ref(database, "config/diasSinClases/" + desde + "_" + Date.now().toString(36)), {
+      desde,
+      hasta,
+      motivo,
+      creadoPorUid: state.authUser.uid,
+      creadoEn: Date.now()
+    });
+    state.calendar.start = "";
+    state.calendar.end = "";
+    state.calendar.notice = "Guardado: " + motivo + " (" + periodLabel({ desde, hasta }) + ").";
+    elements.calendarReason.value = "";
+    renderCalendar();
+  } catch (error) {
+    console.error("No fue posible guardar los días sin clases", error);
+    showCalendarError("No se pudo guardar. Verifica que tu rol sea Directivo o Administrador y que las reglas de Firebase estén publicadas.");
+  } finally {
+    elements.calendarSave.disabled = false;
+  }
+}
+
+async function removeNoClassPeriod(period) {
+  if (!canManage()) return;
+  const confirmed = window.confirm(
+    "¿Quitar «" + period.motivo + "» (" + periodLabel(period) + ")? Esos días volverán a contar llegadas tarde y faltas."
+  );
+  if (!confirmed) return;
+  try {
+    await remove(ref(database, "config/diasSinClases/" + period.id));
+    showCalendarError("");
+  } catch (error) {
+    console.error("No fue posible quitar los días sin clases", error);
+    showCalendarError("No se pudo quitar. Inténtalo de nuevo.");
+  }
 }
 
 /* ---------- Fechas (siempre hora de Colombia, igual que el lector y los informes) ---------- */
@@ -500,6 +776,8 @@ function indexRecords() {
     const day = recordDay(rawRecord);
     if (day === today) presentToday.add(uid);
     if (rawRecord.tarde !== true && rawRecord.tarde !== "true") return;
+    // En días sin clases no se cuentan llegadas tarde.
+    if (noClassPeriodFor(day)) return;
 
     const justification = rawRecord.justificacion && typeof rawRecord.justificacion === "object"
       ? rawRecord.justificacion
@@ -530,8 +808,9 @@ function indexRecords() {
 function buildModel() {
   const index = indexRecords();
   const currentMonth = index.today.slice(0, 7);
-  // Si nadie ha pasado la tarjeta hoy (fin de semana, festivo o muy temprano) no se marcan faltas.
-  const readingStarted = index.presentToday.size > 0;
+  // Sin faltas en días sin clases ni si nadie ha pasado la tarjeta hoy (fin de semana o muy temprano).
+  const todayOff = noClassPeriodFor(index.today);
+  const readingStarted = !todayOff && index.presentToday.size > 0;
   const rows = Object.entries(state.students)
     .filter((entry) => entry[1] && typeof entry[1] === "object")
     .map(([uid, rawStudent]) => {
@@ -552,7 +831,7 @@ function buildModel() {
         faltaExcuse: state.faltas[faltaKey(index.today, studentUid)] || null
       };
     });
-  return { today: index.today, readingStarted, rows };
+  return { today: index.today, todayOff, readingStarted, rows };
 }
 
 /* ---------- Presentación ---------- */
@@ -768,6 +1047,13 @@ function renderStudent(student, options) {
 
 function renderToday(members, model) {
   elements.todayTitle.textContent = "Hoy · " + formatDayLong(model.today);
+  elements.todayOffNotice.hidden = !model.todayOff;
+  elements.todayGrid.hidden = Boolean(model.todayOff);
+  if (model.todayOff) {
+    elements.todayOffNotice.textContent = "Hoy no hay clases: " + model.todayOff.motivo +
+      ". No se cuentan llegadas tarde ni faltas.";
+    return;
+  }
 
   // Llegadas tarde de hoy, de la más reciente a la más antigua.
   const lateToday = [];
@@ -1598,6 +1884,30 @@ elements.statsButton.addEventListener("click", () => {
   if (isActiveStaff(state.profile)) statsView.open();
 });
 // Atajo: el informe del mes del grupo que se está viendo.
+elements.calendarButton.addEventListener("click", () => {
+  if (isActiveStaff(state.profile)) openCalendar();
+});
+elements.calendarPrev.addEventListener("click", () => moveCalendar(-1));
+elements.calendarNext.addEventListener("click", () => moveCalendar(1));
+elements.calendarForm.addEventListener("submit", saveNoClassPeriod);
+elements.calendarClear.addEventListener("click", () => {
+  state.calendar.start = "";
+  state.calendar.end = "";
+  state.calendar.notice = "";
+  elements.calendarReason.value = "";
+  showCalendarError("");
+  renderCalendar();
+});
+[elements.calendarFrom, elements.calendarTo].forEach((input) => {
+  input.addEventListener("change", () => {
+    const from = isDayKey(elements.calendarFrom.value) ? elements.calendarFrom.value : "";
+    const to = isDayKey(elements.calendarTo.value) ? elements.calendarTo.value : "";
+    state.calendar.start = from && to && to < from ? to : from || to;
+    state.calendar.end = from && to ? (to < from ? from : to) : "";
+    if (state.calendar.start) state.calendar.month = monthKeyOf(state.calendar.start);
+    renderCalendar();
+  });
+});
 elements.groupReportButton.addEventListener("click", () => {
   if (isActiveStaff(state.profile)) statsView.open({ period: "mes", group: state.activeGroup });
 });
@@ -1664,7 +1974,9 @@ document.querySelectorAll("[data-close-dialog]").forEach((button) => {
 
 // Vista de estadísticas compartida por todos los roles: sólo consulta datos ya cargados.
 const statsView = createStatsView({
-  getEvents: () => normalizeLateEvents(state.records, state.students, state.evidence),
+  // Las llegadas tarde en días sin clases no se cuentan en informes ni en el Excel.
+  getEvents: () => normalizeLateEvents(state.records, state.students, state.evidence)
+    .filter((event) => !noClassPeriodFor(event.day)),
   onExport: (result, range, filters) => exportToXlsx(
     result,
     range,
@@ -1714,6 +2026,7 @@ onAuthStateChanged(auth, async (user) => {
   state.editingFalta = null;
   state.openStudents.clear();
   state.openMonths.clear();
+  state.noClassPeriods = {};
   state.managedUsers = [];
   state.editingUserUid = null;
 

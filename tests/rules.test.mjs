@@ -117,6 +117,21 @@ test("faltas: todos leen; sólo directivo y admin guardan o quitan excusas", asy
   }
 });
 
+const periodo = (uid) => ({ desde: "2026-10-05", hasta: "2026-10-09", motivo: "Semana de receso", creadoPorUid: uid, creadoEn: 1 });
+
+test("días sin clases: todos los leen (también el lector sin sesión); sólo directivo y admin los marcan", async () => {
+  await assertSucceeds(db(null).ref("config/diasSinClases").once("value"));
+  await assertSucceeds(db("doc").ref("config/diasSinClases").once("value"));
+  await assertFails(db(null).ref("config/diasSinClases/p1").set(periodo("x")));
+  await assertFails(db("doc").ref("config/diasSinClases/p1").set(periodo("doc")));
+  for (const uid of ["dir", "adm"]) {
+    await assertSucceeds(db(uid).ref("config/diasSinClases/p1").set(periodo(uid)));
+    await assertSucceeds(db(uid).ref("config/diasSinClases/p1").remove());
+  }
+  await assertFails(db("dir").ref("config/diasSinClases/p2").set({ ...periodo("dir"), hasta: "2026-10-01" }));
+  await assertFails(db("dir").ref("config/diasSinClases/p2").set({ ...periodo("dir"), extra: 1 }));
+});
+
 test("faltas: la clave debe ser fecha_uid y la excusa debe quedar a nombre de quien la revisa", async () => {
   await assertFails(db("dir").ref("faltas/otra-clave").set(falta("dir")));
   await assertFails(db("dir").ref("faltas/2026-10-05_5AD56CAD1D4187").set(falta("adm")));
