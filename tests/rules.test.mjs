@@ -98,5 +98,27 @@ test("directivo y admin: revisan excusas pero no pueden escribir metadatos de ev
 test("cuenta inactiva no lee nada del panel", async () => {
   await assertFails(db("off").ref("registros").once("value"));
   await assertFails(db("off").ref("evidencias").once("value"));
+  await assertFails(db("off").ref("faltas").once("value"));
   await assertFails(db("off").ref("registros/r1/justificacion").set(justification("off")));
+});
+
+const falta = (uid) => ({
+  uid: "5AD56CAD1D4187", nombre: "Ñusta Ibáñez", grupo: "6.1", fecha: "2026-10-05", justificacion: justification(uid)
+});
+
+test("faltas: todos leen; sólo directivo y admin guardan o quitan excusas", async () => {
+  const path = "faltas/2026-10-05_5AD56CAD1D4187";
+  await assertSucceeds(db("doc").ref("faltas").once("value"));
+  await assertFails(db(null).ref("faltas").once("value"));
+  await assertFails(db("doc").ref(path).set(falta("doc")));
+  for (const uid of ["dir", "adm"]) {
+    await assertSucceeds(db(uid).ref(path).set(falta(uid)));
+    await assertSucceeds(db(uid).ref(path).remove());
+  }
+});
+
+test("faltas: la clave debe ser fecha_uid y la excusa debe quedar a nombre de quien la revisa", async () => {
+  await assertFails(db("dir").ref("faltas/otra-clave").set(falta("dir")));
+  await assertFails(db("dir").ref("faltas/2026-10-05_5AD56CAD1D4187").set(falta("adm")));
+  await assertFails(db("dir").ref("faltas/2026-10-05_5AD56CAD1D4187").set({ ...falta("dir"), extra: true }));
 });

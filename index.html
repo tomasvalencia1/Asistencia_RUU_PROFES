@@ -5,15 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#163a5f">
   <title>IERUU · Panel docente</title>
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <main class="app-shell">
     <section id="loginView" class="login-view" aria-labelledby="loginTitle">
       <div class="login-card">
+        <img class="login-logo" src="logo-ieruu.png" alt="Escudo de la Institución Educativa Rafael Uribe Uribe" width="105" height="120">
         <p class="eyebrow">IERUU · Asistencia</p>
         <h1 id="loginTitle">Panel de docentes</h1>
-        <p class="intro">Consulta las tardanzas por grupo y administra estudiantes según tu rol.</p>
+        <p class="intro">Consulta las llegadas tarde y las faltas de tus grupos.</p>
 
         <form id="loginForm" class="stack-form">
           <label>
@@ -28,84 +31,76 @@
           <button id="loginButton" class="primary-button" type="submit">Ingresar</button>
         </form>
 
-        <p class="help-text">Tu cuenta y tu rol se crean previamente en Firebase por la administración del colegio.</p>
+        <p class="help-text">¿No tienes cuenta o la olvidaste? Pídela a coordinación.</p>
       </div>
     </section>
 
     <section id="appView" hidden>
       <header class="topbar">
-        <div>
-          <p class="eyebrow">IERUU · Panel de asistencia</p>
-          <h1>Tardanzas por grupo</h1>
-          <p class="intro">Los registros nuevos del lector NFC aparecen aquí automáticamente.</p>
+        <div class="brand">
+          <img src="logo-ieruu.png" alt="" width="40" height="46">
+          <div>
+            <p class="eyebrow">IERUU · Asistencia</p>
+            <h1>Panel docente</h1>
+          </div>
         </div>
         <div class="account-area">
           <div class="account-copy">
             <strong id="userName">—</strong>
             <span id="userRole" class="role-pill">—</span>
           </div>
-          <button id="adminUsersButton" class="secondary-button admin-users-button" type="button" hidden>Administrar usuarios</button>
+          <button id="adminUsersButton" class="secondary-button" type="button" hidden>Usuarios</button>
           <button id="logoutButton" class="secondary-button" type="button">Salir</button>
         </div>
       </header>
 
-      <section class="notice" aria-label="Acceso del usuario">
-        <span aria-hidden="true">●</span>
-        <p id="accessNotice">Cargando permisos…</p>
-      </section>
-
-      <section class="summary-grid" aria-label="Resumen">
-        <article class="summary-card">
-          <span>Estudiantes activos</span>
-          <strong id="studentCount">—</strong>
-        </article>
-        <article class="summary-card">
-          <span>Tardanzas acumuladas</span>
-          <strong id="lateCount">—</strong>
-        </article>
-        <article class="summary-card">
-          <span>Tardanzas registradas</span>
-          <strong id="lateRecordCount">—</strong>
-        </article>
-      </section>
-
-      <section class="controls-panel" aria-label="Controles del panel">
+      <section class="toolbar" aria-label="Buscar y descargar informes">
         <label class="search-field" for="searchInput">
-          <span>Buscar estudiante</span>
-          <input id="searchInput" type="search" autocomplete="off" placeholder="Nombre, grupo o UID de la tarjeta">
+          <span class="visually-hidden">Buscar estudiante</span>
+          <input id="searchInput" type="search" autocomplete="off" placeholder="Buscar estudiante por nombre o tarjeta…">
         </label>
-        <div class="button-row">
-          <button id="statsButton" class="secondary-button stats-button" type="button">Estadísticas y Excel</button>
-          <button id="refreshButton" class="secondary-button" type="button">Actualizar</button>
-          <button id="addStudentButton" class="primary-button" type="button" hidden>Añadir estudiante</button>
-        </div>
+        <button id="statsButton" class="secondary-button stats-button" type="button">Informes y Excel</button>
       </section>
 
-      <p id="syncStatus" class="sync-status" role="status" aria-live="polite">Conectando con Firebase…</p>
+      <p id="syncStatus" class="sync-status" role="status" aria-live="polite">Conectando…</p>
       <p id="dataWarning" class="data-warning" role="alert" hidden></p>
 
-      <nav id="groupTabs" class="group-tabs" aria-label="Grupos de sexto a undécimo" role="tablist"></nav>
+      <nav id="groupPicker" class="group-picker" aria-label="Elige un grupo"></nav>
 
-      <section class="group-panel" aria-live="polite">
+      <section id="groupPanel" class="group-panel" aria-labelledby="activeGroupTitle">
         <header class="group-panel-header">
           <div>
-            <p class="section-label">Grupo seleccionado</p>
+            <p id="activeGroupLabel" class="section-label">Grupo</p>
             <h2 id="activeGroupTitle">Grupo 6.1</h2>
+            <p id="activeGroupCount" class="group-count">0 estudiantes</p>
           </div>
-          <span id="activeGroupCount" class="group-count">0 estudiantes</span>
+          <div class="group-actions">
+            <button id="groupReportButton" class="secondary-button" type="button">Informe del grupo</button>
+            <button id="addStudentButton" class="primary-button" type="button" hidden>Añadir estudiante</button>
+          </div>
         </header>
-        <div id="studentsContainer" class="students-container"></div>
-      </section>
 
-      <section class="group-panel faltas-panel" aria-live="polite">
-        <header class="group-panel-header">
-          <div>
-            <p class="section-label">Faltas de hoy</p>
-            <h2>Inasistencias</h2>
+        <section id="todaySection" class="today-section" aria-labelledby="todayTitle">
+          <h3 id="todayTitle" class="today-title">Hoy</h3>
+          <div class="today-grid">
+            <article class="today-card today-late" aria-labelledby="todayLateHeading">
+              <h4 id="todayLateHeading">Llegaron tarde <span id="todayLateCount" class="count-pill">0</span></h4>
+              <div id="todayLateList" class="today-list"></div>
+            </article>
+            <article class="today-card today-absent" aria-labelledby="todayAbsentHeading">
+              <h4 id="todayAbsentHeading">Faltas <span id="faltasCount" class="count-pill">0</span></h4>
+              <div id="faltasContainer" class="today-list"></div>
+            </article>
           </div>
-          <span id="faltasCount" class="group-count">0 faltas hoy</span>
-        </header>
-        <div id="faltasContainer" class="students-container"></div>
+        </section>
+
+        <section class="students-section" aria-labelledby="studentsHeading">
+          <div class="students-heading">
+            <h3 id="studentsHeading">Estudiantes</h3>
+            <p class="students-hint">Toca un nombre para ver sus llegadas tarde y excusas.</p>
+          </div>
+          <div id="studentsContainer" class="students-container"></div>
+        </section>
       </section>
     </section>
   </main>
@@ -120,8 +115,9 @@
         <button class="icon-button" type="button" data-close-dialog="studentDialog" aria-label="Cerrar">×</button>
       </div>
       <label>
-        <span>UID de la tarjeta NFC</span>
-        <input id="studentUidInput" name="uid" type="text" required maxlength="32" placeholder="Ejemplo: 5AD56CAD1D4187">
+        <span>Código de la tarjeta (UID)</span>
+        <input id="studentUidInput" name="uid" type="text" required maxlength="32" autocapitalize="characters" spellcheck="false" placeholder="Ejemplo: 5AD56CAD1D4187">
+        <small class="field-hint">La app del lector lo muestra al pasar una tarjeta no registrada («Copiar código»).</small>
       </label>
       <label>
         <span>Nombre completo</span>
@@ -143,27 +139,27 @@
     <form id="excuseForm" class="stack-form" novalidate>
       <div class="dialog-heading">
         <div>
-          <p class="eyebrow">Revisión de tardanza</p>
-          <h2 id="excuseDialogTitle">Validar excusa</h2>
+          <p id="excuseDialogEyebrow" class="eyebrow">Llegada tarde</p>
+          <h2 id="excuseDialogTitle">Excusa</h2>
         </div>
         <button class="icon-button" type="button" data-close-dialog="excuseDialog" aria-label="Cerrar">×</button>
       </div>
       <p id="excuseRecordInfo" class="record-info"></p>
+      <fieldset class="choice-fieldset">
+        <legend>¿Cómo queda la excusa?</legend>
+        <div class="choice-row">
+          <label class="choice choice-pendiente"><input type="radio" name="excuseStatus" value="pendiente" checked><span>Pendiente</span></label>
+          <label class="choice choice-validada"><input type="radio" name="excuseStatus" value="validada"><span>Validada</span></label>
+          <label class="choice choice-rechazada"><input type="radio" name="excuseStatus" value="rechazada"><span>Rechazada</span></label>
+        </div>
+      </fieldset>
       <label>
-        <span>Estado de la excusa</span>
-        <select id="excuseStatusInput" name="estado" required>
-          <option value="pendiente">Pendiente de revisión</option>
-          <option value="validada">Excusa validada</option>
-          <option value="rechazada">Excusa rechazada</option>
-        </select>
+        <span id="excuseReasonLabel">Motivo</span>
+        <textarea id="excuseReasonInput" name="motivo" rows="4" maxlength="500" required placeholder="Ejemplo: cita médica, transporte escolar, explicación entregada por el acudiente"></textarea>
       </label>
-      <label>
-        <span>Motivo de la llegada tarde o excusa</span>
-        <textarea id="excuseReasonInput" name="motivo" rows="5" maxlength="500" required placeholder="Ejemplo: cita médica, transporte escolar, explicación entregada por acudiente"></textarea>
-      </label>
-      <section class="evidence-editor" aria-labelledby="evidenceEditorTitle">
+      <section id="evidenceSection" class="evidence-editor" aria-labelledby="evidenceEditorTitle">
         <div class="evidence-editor-heading">
-          <span id="evidenceEditorTitle">Foto de evidencia (opcional)</span>
+          <span id="evidenceEditorTitle">Foto de la excusa (opcional)</span>
           <small>Se comprime antes de subir · sólo la ve el personal con sesión activa</small>
         </div>
         <div id="evidenceDropZone" class="evidence-drop" tabindex="0" role="button" aria-describedby="evidenceDropText">
@@ -185,7 +181,7 @@
         <button id="deleteExcuseButton" class="danger-button" type="button" hidden>Quitar excusa</button>
         <span class="dialog-spacer"></span>
         <button class="secondary-button" type="button" data-close-dialog="excuseDialog">Cancelar</button>
-        <button id="saveExcuseButton" class="primary-button" type="submit">Guardar revisión</button>
+        <button id="saveExcuseButton" class="primary-button" type="submit">Guardar</button>
       </div>
     </form>
   </dialog>
@@ -214,15 +210,15 @@
     <div class="stats-content">
       <div class="dialog-heading">
         <div>
-          <p class="eyebrow">Consulta de llegadas tarde</p>
-          <h2 id="statsDialogTitle">Estadísticas y Excel</h2>
+          <p class="eyebrow">Llegadas tarde</p>
+          <h2 id="statsDialogTitle">Informes y Excel</h2>
         </div>
         <button class="icon-button" type="button" data-close-dialog="statsDialog" aria-label="Cerrar">×</button>
       </div>
 
       <form id="statsForm" class="stats-form" novalidate>
         <fieldset class="period-fieldset">
-          <legend>Periodo</legend>
+          <legend>1. Elige el periodo</legend>
           <div class="period-chips">
             <label class="chip"><input type="radio" name="statsPeriod" value="hoy" checked><span>Hoy</span></label>
             <label class="chip"><input type="radio" name="statsPeriod" value="semana"><span>Esta semana</span></label>
@@ -248,24 +244,27 @@
           </div>
         </fieldset>
 
-        <div class="stats-filter-grid">
-          <label class="filter-field">
-            <span>Grupo</span>
-            <select id="statsGroupInput"></select>
-          </label>
-          <label class="filter-field">
-            <span>Franja</span>
-            <select id="statsFranjaInput"></select>
-          </label>
-          <label class="filter-field">
-            <span>Estado de la excusa</span>
-            <select id="statsExcuseInput"></select>
-          </label>
-          <label class="filter-field">
-            <span>Nombre del estudiante</span>
-            <input id="statsNameInput" type="search" autocomplete="off" placeholder="Ej.: Peña">
-          </label>
-        </div>
+        <fieldset class="period-fieldset">
+          <legend>2. Filtra si lo necesitas</legend>
+          <div class="stats-filter-grid">
+            <label class="filter-field">
+              <span>Grupo</span>
+              <select id="statsGroupInput"></select>
+            </label>
+            <label class="filter-field">
+              <span>Franja</span>
+              <select id="statsFranjaInput"></select>
+            </label>
+            <label class="filter-field">
+              <span>Estado de la excusa</span>
+              <select id="statsExcuseInput"></select>
+            </label>
+            <label class="filter-field">
+              <span>Nombre del estudiante</span>
+              <input id="statsNameInput" type="search" autocomplete="off" placeholder="Ej.: Peña">
+            </label>
+          </div>
+        </fieldset>
         <div class="stats-form-actions">
           <button id="statsResetButton" class="small-button" type="button">Limpiar filtros</button>
         </div>
@@ -314,7 +313,7 @@
       </section>
 
       <section class="stats-export" aria-label="Descargar en Excel">
-        <p>El archivo incluye exactamente el periodo y los filtros que estás viendo: una hoja de resumen por grupo y una hoja con el detalle.</p>
+        <p>3. Descarga exactamente lo que ves: una hoja de resumen por grupo y una hoja con el detalle.</p>
         <button id="statsExportButton" class="primary-button" type="button">Descargar Excel (.xlsx)</button>
         <p id="statsExportStatus" class="sync-status" role="status" aria-live="polite"></p>
       </section>

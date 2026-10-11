@@ -70,6 +70,8 @@ export function initializeApp(config) { return { config }; }
 // firebase-auth
 let authCallback = null;
 export function getAuth() { return {}; }
+export const browserSessionPersistence = { type: "SESSION" };
+export async function setPersistence() {}
 export function onAuthStateChanged(auth, callback) {
   authCallback = callback;
   setTimeout(() => callback(mock.user || null), 0);

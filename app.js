@@ -8,6 +8,11 @@
  * Los permisos reales no dependen de los botones: database.rules.json los
  * aplica también en Firebase para que un docente no pueda modificar datos
  * desde las herramientas del navegador.
+ *
+ * Organización de la pantalla (pensada para el docente):
+ * 1. Elegir un grupo (se recuerda en este navegador).
+ * 2. "Hoy": quién llegó tarde y quién no ha llegado (faltas).
+ * 3. Lista de estudiantes; al tocar un nombre se ven sus llegadas tarde y excusas.
  */
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
@@ -33,7 +38,15 @@ import {
   httpsCallable
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-functions.js";
 import { firebaseConfig } from "./firebase-config.js";
-import { normalizeLateEvents, todayKey } from "./query.js";
+import {
+  bogotaParts,
+  formatDayLong,
+  franjaLabel,
+  isDayKey,
+  makeDayKey,
+  normalizeLateEvents,
+  todayKey
+} from "./query.js";
 import { createStatsView } from "./stats.js";
 import { exportToXlsx } from "./export-xlsx.js";
 import {
@@ -56,12 +69,20 @@ const manageUsersCallable = httpsCallable(functions, "manageUsers");
 const evidenceClient = createEvidenceClient(httpsCallable(functions, "evidencias", { timeout: 90000 }));
 const thumbnailLoader = createThumbnailLoader(evidenceClient);
 
+const GRADES = [
+  { grade: 6, label: "Sexto" },
+  { grade: 7, label: "Séptimo" },
+  { grade: 8, label: "Octavo" },
+  { grade: 9, label: "Noveno" },
+  { grade: 10, label: "Décimo" },
+  { grade: 11, label: "Undécimo" }
+];
 const GROUPS = [];
-for (let grade = 6; grade <= 11; grade += 1) {
+GRADES.forEach(({ grade }) => {
   for (let section = 1; section <= 3; section += 1) {
     GROUPS.push(String(grade) + "." + String(section));
   }
-}
+});
 
 const STAFF_ROLES = new Set(["docente", "directivo", "admin"]);
 const MANAGER_ROLES = new Set(["directivo", "admin"]);
@@ -75,16 +96,13 @@ const EXCUSE_LABELS = {
   validada: "Validada",
   rechazada: "Rechazada"
 };
+const WEEKDAYS = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
+const MONTHS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+const MONTH_NAMES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+// Con hasta este número de resultados, la búsqueda abre directamente el detalle de cada estudiante.
+const SEARCH_AUTO_EXPAND = 3;
+const GROUP_STORAGE_KEY = "ieruu.grupo";
 
-const dateFormatter = new Intl.DateTimeFormat("es-CO", {
-  day: "2-digit",
-  month: "short",
-  year: "numeric"
-});
-const monthFormatter = new Intl.DateTimeFormat("es-CO", {
-  month: "long",
-  year: "numeric"
-});
 const groupCollator = new Intl.Collator("es-CO", {
   numeric: true,
   sensitivity: "base"
@@ -102,20 +120,25 @@ const elements = {
   adminUsersButton: document.querySelector("#adminUsersButton"),
   userName: document.querySelector("#userName"),
   userRole: document.querySelector("#userRole"),
-  accessNotice: document.querySelector("#accessNotice"),
-  studentCount: document.querySelector("#studentCount"),
-  lateCount: document.querySelector("#lateCount"),
-  lateRecordCount: document.querySelector("#lateRecordCount"),
   searchInput: document.querySelector("#searchInput"),
-  refreshButton: document.querySelector("#refreshButton"),
   statsButton: document.querySelector("#statsButton"),
   statsDialog: document.querySelector("#statsDialog"),
-  addStudentButton: document.querySelector("#addStudentButton"),
   syncStatus: document.querySelector("#syncStatus"),
   dataWarning: document.querySelector("#dataWarning"),
-  groupTabs: document.querySelector("#groupTabs"),
+  groupPicker: document.querySelector("#groupPicker"),
+  groupPanel: document.querySelector("#groupPanel"),
+  activeGroupLabel: document.querySelector("#activeGroupLabel"),
   activeGroupTitle: document.querySelector("#activeGroupTitle"),
   activeGroupCount: document.querySelector("#activeGroupCount"),
+  groupReportButton: document.querySelector("#groupReportButton"),
+  addStudentButton: document.querySelector("#addStudentButton"),
+  todaySection: document.querySelector("#todaySection"),
+  todayTitle: document.querySelector("#todayTitle"),
+  todayLateList: document.querySelector("#todayLateList"),
+  todayLateCount: document.querySelector("#todayLateCount"),
+  faltasContainer: document.querySelector("#faltasContainer"),
+  faltasCount: document.querySelector("#faltasCount"),
+  studentsHeading: document.querySelector("#studentsHeading"),
   studentsContainer: document.querySelector("#studentsContainer"),
   studentDialog: document.querySelector("#studentDialog"),
   studentForm: document.querySelector("#studentForm"),
@@ -126,12 +149,16 @@ const elements = {
   saveStudentButton: document.querySelector("#saveStudentButton"),
   excuseDialog: document.querySelector("#excuseDialog"),
   excuseForm: document.querySelector("#excuseForm"),
+  excuseDialogEyebrow: document.querySelector("#excuseDialogEyebrow"),
+  excuseDialogTitle: document.querySelector("#excuseDialogTitle"),
   excuseRecordInfo: document.querySelector("#excuseRecordInfo"),
-  excuseStatusInput: document.querySelector("#excuseStatusInput"),
+  excuseStatusInputs: [...document.querySelectorAll("input[name='excuseStatus']")],
+  excuseReasonLabel: document.querySelector("#excuseReasonLabel"),
   excuseReasonInput: document.querySelector("#excuseReasonInput"),
   excuseFormError: document.querySelector("#excuseFormError"),
   saveExcuseButton: document.querySelector("#saveExcuseButton"),
   deleteExcuseButton: document.querySelector("#deleteExcuseButton"),
+  evidenceSection: document.querySelector("#evidenceSection"),
   evidenceDropZone: document.querySelector("#evidenceDropZone"),
   evidencePreview: document.querySelector("#evidencePreview"),
   evidenceDropText: document.querySelector("#evidenceDropText"),
@@ -173,7 +200,7 @@ const state = {
   students: {},
   records: {},
   faltas: {},
-  activeGroup: GROUPS[0],
+  activeGroup: savedGroup(),
   search: "",
   sessionId: 0,
   studentUnsubscribe: null,
@@ -183,7 +210,10 @@ const state = {
   evidenceUnsubscribe: null,
   evidenceEditor: null,
   editingRecordId: null,
-  editingFaltaKey: null,
+  editingFalta: null,
+  // Qué estudiantes y meses abrió el usuario: se conserva aunque lleguen lecturas nuevas en vivo.
+  openStudents: new Map(),
+  openMonths: new Map(),
   managedUsers: [],
   editingUserUid: null
 };
@@ -196,13 +226,8 @@ function text(value) {
 function searchText(value) {
   return text(value)
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[̀-ͯ]/g, "")
     .toLocaleLowerCase("es-CO");
-}
-
-function numberOrZero(value) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed >= 0 ? Math.trunc(parsed) : 0;
 }
 
 function uidKey(value) {
@@ -225,11 +250,33 @@ function normalizeGroup(value) {
   return "";
 }
 
+function savedGroup() {
+  try {
+    const stored = window.localStorage.getItem(GROUP_STORAGE_KEY);
+    if (GROUPS.includes(stored)) return stored;
+  } catch (error) {
+    // Navegación privada o almacenamiento bloqueado: se empieza por el primer grupo.
+  }
+  return GROUPS[0];
+}
+
+function rememberGroup(group) {
+  try {
+    window.localStorage.setItem(GROUP_STORAGE_KEY, group);
+  } catch (error) {
+    // No es necesario recordar el grupo para usar el panel.
+  }
+}
+
 function createElement(tagName, className, content) {
   const node = document.createElement(tagName);
   if (className) node.className = className;
   if (content !== undefined) node.textContent = content;
   return node;
+}
+
+function plural(count, singular, pluralForm) {
+  return String(count) + " " + (count === 1 ? singular : pluralForm);
 }
 
 function roleLabel(role) {
@@ -251,6 +298,7 @@ function isAdmin() {
 function setStatus(message, isError) {
   elements.syncStatus.textContent = message;
   elements.syncStatus.classList.toggle("error", Boolean(isError));
+  elements.syncStatus.classList.toggle("live", !isError && message.includes("en vivo"));
 }
 
 function showLoginError(message) {
@@ -277,6 +325,7 @@ function showLogin() {
   closeDialog(elements.userAdminDialog);
   closeDialog(elements.statsDialog);
   closeDialog(elements.excuseDialog);
+  closeDialog(elements.studentDialog);
   closeDialog(elements.evidenceViewer);
   elements.appView.hidden = true;
   elements.loginView.hidden = false;
@@ -291,10 +340,6 @@ function showApp() {
   elements.userRole.textContent = roleLabel(text(state.profile.rol));
   elements.addStudentButton.hidden = !canManage();
   elements.adminUsersButton.hidden = !isAdmin();
-  const currentRole = roleLabel(text(state.profile.rol));
-  elements.accessNotice.textContent = canManage()
-    ? currentRole + ": puedes añadir o quitar estudiantes y revisar, validar o quitar excusas."
-    : currentRole + ": puedes consultar estudiantes, tardanzas y las excusas registradas. No puedes modificarlas.";
 }
 
 function detachDatabaseListeners() {
@@ -325,17 +370,21 @@ function loginErrorMessage(error) {
   return "No fue posible iniciar sesión. Verifica Internet e inténtalo de nuevo.";
 }
 
+function liveStatus() {
+  setStatus("Conexión en vivo · actualizado " + new Date().toLocaleTimeString("es-CO", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  }), false);
+}
+
 function subscribeToData() {
   state.studentUnsubscribe = onValue(
     ref(database, "estudiantes"),
     (snapshot) => {
       state.students = snapshot.val() || {};
       render();
-      setStatus("Conexión en vivo · actualizado " + new Date().toLocaleTimeString("es-CO", {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit"
-      }), false);
+      liveStatus();
     },
     () => {
       setStatus("No fue posible leer estudiantes. Revisa tu conexión o las reglas de Firebase.", true);
@@ -347,14 +396,10 @@ function subscribeToData() {
     (snapshot) => {
       state.records = snapshot.val() || {};
       render();
-      setStatus("Conexión en vivo · actualizado " + new Date().toLocaleTimeString("es-CO", {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit"
-      }), false);
+      liveStatus();
     },
     () => {
-      setStatus("No fue posible leer tardanzas. Revisa tu conexión o las reglas de Firebase.", true);
+      setStatus("No fue posible leer las llegadas tarde. Revisa tu conexión o las reglas de Firebase.", true);
     }
   );
 
@@ -387,119 +432,130 @@ function subscribeToData() {
   );
 }
 
+/* ---------- Fechas (siempre hora de Colombia, igual que el lector y los informes) ---------- */
+
 function recordTimestamp(record) {
   const storedTimestamp = Number(record.timestamp);
   if (Number.isFinite(storedTimestamp) && storedTimestamp > 0) return storedTimestamp;
 
   const date = text(record.fecha);
   const time = text(record.hora) || "00:00:00";
-  const parsed = Date.parse(date + "T" + time);
+  const parsed = Date.parse(date + "T" + time + "-05:00");
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function formatExactDate(record) {
-  const storedDate = text(record.fecha);
-  const storedTime = text(record.hora);
-  const dateParts = storedDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-
-  if (dateParts) {
-    const localDate = new Date(
-      Number(dateParts[1]),
-      Number(dateParts[2]) - 1,
-      Number(dateParts[3])
-    );
-    return dateFormatter.format(localDate) + (storedTime ? " · " + storedTime : "");
-  }
-
+function recordDay(record) {
+  const stored = text(record.fecha);
+  if (isDayKey(stored)) return stored;
   const timestamp = recordTimestamp(record);
-  if (timestamp) {
-    return new Date(timestamp).toLocaleString("es-CO", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit"
-    });
-  }
-
-  return storedTime || "Fecha no disponible";
+  if (!timestamp) return "";
+  const parts = bogotaParts(timestamp);
+  return makeDayKey(parts.year, parts.month, parts.day);
 }
 
-function monthKey(record) {
-  const match = text(record.fecha).match(/^(\d{4})-(\d{2})-\d{2}$/);
-  if (match) return match[1] + "-" + match[2];
-
+function recordTime(record) {
+  const stored = text(record.hora);
+  if (/^\d{2}:\d{2}(:\d{2})?$/.test(stored)) return stored;
   const timestamp = recordTimestamp(record);
-  if (!timestamp) return "sin-fecha";
-  const date = new Date(timestamp);
-  return String(date.getFullYear()) + "-" + String(date.getMonth() + 1).padStart(2, "0");
+  if (!timestamp) return "";
+  const parts = bogotaParts(timestamp);
+  return String(parts.hour).padStart(2, "0") + ":" + String(parts.minute).padStart(2, "0");
+}
+
+// "07:05:30" → "7:05 a. m."
+function clockLabel(time) {
+  const match = text(time).match(/^(\d{2}):(\d{2})/);
+  if (!match) return "";
+  const hours = Number(match[1]);
+  const hour12 = hours % 12 === 0 ? 12 : hours % 12;
+  return String(hour12) + ":" + match[2] + (hours < 12 ? " a. m." : " p. m.");
+}
+
+// "2026-10-01" → "jue 1 de oct"
+function shortDayLabel(day) {
+  const match = text(day).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return "Fecha sin identificar";
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  return WEEKDAYS[date.getUTCDay()] + " " + String(Number(match[3])) + " de " + MONTHS[Number(match[2]) - 1];
 }
 
 function monthLabel(key) {
-  const match = key.match(/^(\d{4})-(\d{2})$/);
+  const match = text(key).match(/^(\d{4})-(\d{2})$/);
   if (!match) return "Fecha sin identificar";
-
-  const result = monthFormatter.format(new Date(Number(match[1]), Number(match[2]) - 1, 1));
-  return result.charAt(0).toUpperCase() + result.slice(1);
+  return MONTH_NAMES[Number(match[2]) - 1] + " de " + match[1];
 }
 
-function lateRecordIndex() {
-  const index = new Map();
+/* ---------- Datos calculados ---------- */
+
+// Una sola pasada por /registros: llegadas tarde por estudiante y quién tiene alguna lectura hoy.
+function indexRecords() {
+  const today = todayKey();
+  const lateByUid = new Map();
+  const presentToday = new Set();
 
   Object.entries(state.records).forEach(([id, rawRecord]) => {
-    if (!rawRecord || (rawRecord.tarde !== true && rawRecord.tarde !== "true")) return;
-
+    if (!rawRecord || typeof rawRecord !== "object") return;
     const uid = uidKey(rawRecord.uid);
     if (!uid) return;
+    const day = recordDay(rawRecord);
+    if (day === today) presentToday.add(uid);
+    if (rawRecord.tarde !== true && rawRecord.tarde !== "true") return;
 
     const justification = rawRecord.justificacion && typeof rawRecord.justificacion === "object"
       ? rawRecord.justificacion
       : null;
+    const time = recordTime(rawRecord);
     const event = {
       id,
       record: rawRecord,
       timestamp: recordTimestamp(rawRecord),
-      exactDate: formatExactDate(rawRecord),
-      month: monthKey(rawRecord),
+      day,
+      time,
+      month: day ? day.slice(0, 7) : "sin-fecha",
+      franja: franjaLabel(rawRecord.periodo),
+      exactDate: (day ? shortDayLabel(day) : "Sin fecha") + (time ? " · " + clockLabel(time) : ""),
       justification
     };
 
-    if (!index.has(uid)) index.set(uid, []);
-    index.get(uid).push(event);
+    if (!lateByUid.has(uid)) lateByUid.set(uid, []);
+    lateByUid.get(uid).push(event);
   });
 
-  index.forEach((events) => {
+  lateByUid.forEach((events) => {
     events.sort((first, second) => second.timestamp - first.timestamp);
   });
-  return index;
+  return { today, lateByUid, presentToday };
 }
 
-function studentRows() {
-  const lateByUid = lateRecordIndex();
-  return Object.entries(state.students)
+function buildModel() {
+  const index = indexRecords();
+  const currentMonth = index.today.slice(0, 7);
+  // Si nadie ha pasado la tarjeta hoy (fin de semana, festivo o muy temprano) no se marcan faltas.
+  const readingStarted = index.presentToday.size > 0;
+  const rows = Object.entries(state.students)
     .filter((entry) => entry[1] && typeof entry[1] === "object")
     .map(([uid, rawStudent]) => {
-      const group = normalizeGroup(rawStudent.grupo);
       const key = uidKey(uid);
+      const lateEvents = index.lateByUid.get(key) || [];
+      const studentUid = key || text(uid).toUpperCase();
+      const lateToday = lateEvents.filter((event) => event.day === index.today);
+      const absentToday = readingStarted && !index.presentToday.has(key);
       return {
-        uid: key || text(uid).toUpperCase(),
+        uid: studentUid,
         name: text(rawStudent.nombre) || "Sin nombre",
         rawGroup: text(rawStudent.grupo),
-        group,
-        lateTotal: numberOrZero(rawStudent.llegadasTarde),
-        lateEvents: lateByUid.get(key) || []
+        group: normalizeGroup(rawStudent.grupo),
+        lateEvents,
+        lateThisMonth: lateEvents.filter((event) => event.month === currentMonth).length,
+        lateToday,
+        absentToday,
+        faltaExcuse: state.faltas[faltaKey(index.today, studentUid)] || null
       };
     });
+  return { today: index.today, readingStarted, rows };
 }
 
-function renderSummary(rows) {
-  const totalLates = rows.reduce((total, student) => total + student.lateTotal, 0);
-  const totalEvents = rows.reduce((total, student) => total + student.lateEvents.length, 0);
-  elements.studentCount.textContent = String(rows.length);
-  elements.lateCount.textContent = String(totalLates);
-  elements.lateRecordCount.textContent = String(totalEvents);
-}
+/* ---------- Presentación ---------- */
 
 function renderWarning(rows) {
   const invalidGroups = rows.filter((student) => !GROUPS.includes(student.group));
@@ -510,30 +566,48 @@ function renderWarning(rows) {
 
   elements.dataWarning.hidden = false;
   elements.dataWarning.textContent =
-    String(invalidGroups.length) +
-    " estudiante(s) no aparece(n) en las pestañas porque su grupo no tiene el formato 6.1 a 11.3. Corrige el dato en Firebase.";
+    plural(invalidGroups.length, "estudiante no aparece", "estudiantes no aparecen") +
+    " en ningún grupo porque su grupo no tiene el formato 6.1 a 11.3. Corrige el dato en Firebase.";
 }
 
-function renderTabs(rows) {
+function selectGroup(group) {
+  state.activeGroup = group;
+  rememberGroup(group);
+  if (state.search) {
+    state.search = "";
+    elements.searchInput.value = "";
+  }
+  render();
+  // En el celular el grupo queda debajo de los botones: se lleva la vista hasta él.
+  if (window.matchMedia("(max-width: 800px)").matches) {
+    const smooth = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    elements.groupPanel.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "start" });
+  }
+}
+
+function renderGroupPicker(rows) {
   const counts = new Map(GROUPS.map((group) => [group, 0]));
   rows.forEach((student) => {
     if (counts.has(student.group)) counts.set(student.group, counts.get(student.group) + 1);
   });
 
-  elements.groupTabs.replaceChildren();
-  GROUPS.forEach((group) => {
-    const tab = createElement("button", "group-tab");
-    tab.type = "button";
-    tab.setAttribute("role", "tab");
-    tab.setAttribute("aria-selected", String(group === state.activeGroup));
-    tab.setAttribute("aria-controls", "studentsContainer");
-    tab.append(createElement("span", "", group));
-    tab.append(createElement("span", "tab-count", String(counts.get(group))));
-    tab.addEventListener("click", () => {
-      state.activeGroup = group;
-      render();
-    });
-    elements.groupTabs.append(tab);
+  elements.groupPicker.replaceChildren();
+  GRADES.forEach(({ grade, label }) => {
+    const box = createElement("div", "grade-box");
+    box.append(createElement("span", "grade-label", label));
+    const buttons = createElement("div", "grade-buttons");
+    for (let section = 1; section <= 3; section += 1) {
+      const group = String(grade) + "." + String(section);
+      const button = createElement("button", "group-button", group);
+      button.type = "button";
+      const selected = !state.search && group === state.activeGroup;
+      button.setAttribute("aria-pressed", String(selected));
+      button.setAttribute("aria-label", "Grupo " + group + ", " + plural(counts.get(group), "estudiante", "estudiantes"));
+      button.addEventListener("click", () => selectGroup(group));
+      buttons.append(button);
+    }
+    box.append(buttons);
+    elements.groupPicker.append(box);
   });
 }
 
@@ -542,7 +616,7 @@ function excusePresentation(justification) {
     return {
       state: "empty",
       label: "Sin excusa",
-      detail: "No se ha registrado motivo ni validación."
+      detail: ""
     };
   }
 
@@ -574,9 +648,26 @@ function renderEvidenceThumb(event, student, evidence) {
   return button;
 }
 
+/*
+ * <details> que recuerda si el usuario lo abrió o lo cerró. `fallback` es lo que se muestra
+ * mientras el usuario no haya decidido (por ejemplo, el mes más reciente abierto).
+ */
+function rememberedDetails(className, store, key, fallback) {
+  const details = createElement("details", className);
+  const open = store.has(key) ? store.get(key) : fallback;
+  details.open = open;
+  details.dataset.renderedOpen = String(open);
+  details.addEventListener("toggle", () => {
+    // El evento también se dispara al pintar; sólo cuenta si el usuario cambió el estado.
+    if (String(details.open) === details.dataset.renderedOpen) return;
+    details.dataset.renderedOpen = String(details.open);
+    store.set(key, details.open);
+  });
+  return details;
+}
+
 function renderEvents(student) {
   const column = createElement("section", "events-column");
-  column.append(createElement("span", "field-label events-heading", "Llegadas tarde por mes"));
 
   if (!student.lateEvents.length) {
     column.append(createElement("p", "events-empty", "Sin llegadas tarde registradas."));
@@ -592,32 +683,33 @@ function renderEvents(student) {
   [...months.entries()]
     .sort(([first], [second]) => second.localeCompare(first))
     .forEach(([month, events], index) => {
-      const details = createElement("details", "month-block");
-      details.open = index === 0;
+      const details = rememberedDetails("month-block", state.openMonths, student.uid + "|" + month, index === 0);
       const summary = createElement(
         "summary",
         "",
-        monthLabel(month) + " · " + String(events.length) + " tardanza" + (events.length === 1 ? "" : "s")
+        monthLabel(month) + " · " + plural(events.length, "llegada tarde", "llegadas tarde")
       );
       const list = createElement("div", "month-events");
 
       events.forEach((event) => {
         const eventRow = createElement("article", "late-event");
-        const date = createElement("span", "event-date", event.exactDate);
+        const when = createElement("div", "event-when");
+        when.append(createElement("span", "event-date", event.exactDate));
+        when.append(createElement("span", "event-franja", event.franja));
         const excuse = excusePresentation(event.justification);
         const excuseArea = createElement("div", "event-excuse");
         const excuseText = createElement("div", "event-excuse-text");
         excuseText.append(createElement("span", "state-pill state-" + excuse.state, excuse.label));
-        excuseText.append(createElement("p", "", excuse.detail));
+        if (excuse.detail) excuseText.append(createElement("p", "", excuse.detail));
         excuseArea.append(excuseText);
         const evidence = event.justification ? state.evidence[event.id] : null;
         if (evidence && evidence.version) {
           excuseArea.append(renderEvidenceThumb(event, student, evidence));
         }
-        eventRow.append(date, excuseArea);
+        eventRow.append(when, excuseArea);
 
         if (canManage()) {
-          const reviewButton = createElement("button", "small-button", event.justification ? "Editar excusa" : "Validar excusa");
+          const reviewButton = createElement("button", "small-button", event.justification ? "Editar excusa" : "Agregar excusa");
           reviewButton.type = "button";
           reviewButton.addEventListener("click", () => openExcuseDialog(event, student));
           eventRow.append(reviewButton);
@@ -633,59 +725,151 @@ function renderEvents(student) {
   return column;
 }
 
-function renderStudent(student, showGroup) {
+function renderStudent(student, options) {
   const card = createElement("article", "student-card");
+  const details = rememberedDetails("student-details", state.openStudents, student.uid, options.expand);
 
-  const identity = createElement("div", "identity-column");
-  identity.append(createElement("h3", "student-name", student.name));
-  if (showGroup) {
-    identity.append(createElement("p", "student-group", "Grupo " + student.group));
-  }
-  identity.append(createElement("p", "uid-text", "UID: " + student.uid));
+  const summary = createElement("summary", "student-summary");
+  const main = createElement("span", "student-main");
+  main.append(createElement("span", "student-name", student.name));
+  const tags = createElement("span", "student-tags");
+  if (options.showGroup) tags.append(createElement("span", "student-group", student.group ? "Grupo " + student.group : "Sin grupo"));
+  if (student.lateToday.length) tags.append(createElement("span", "mini-tag mini-late", "Tarde hoy"));
+  if (student.absentToday) tags.append(createElement("span", "mini-tag mini-absent", "Falta hoy"));
+  if (tags.childElementCount) main.append(tags);
+
+  const totals = createElement("span", "student-totals");
+  const total = createElement("span", "late-total" + (student.lateEvents.length ? "" : " zero"), String(student.lateEvents.length));
+  total.setAttribute("aria-label", plural(student.lateEvents.length, "llegada tarde", "llegadas tarde"));
+  totals.append(total);
+  totals.append(createElement(
+    "span",
+    "late-caption",
+    (student.lateEvents.length === 1 ? "llegada tarde" : "llegadas tarde") +
+      (student.lateThisMonth ? " · " + String(student.lateThisMonth) + " este mes" : "")
+  ));
+  summary.append(main, totals, createElement("span", "chevron"));
+
+  const body = createElement("div", "student-body");
+  const meta = createElement("div", "student-meta");
+  meta.append(createElement("span", "uid-text", "Tarjeta: " + student.uid));
   if (canManage()) {
-    const actions = createElement("div", "student-actions");
-    const removeButton = createElement("button", "small-button danger", "Quitar estudiante");
+    const removeButton = createElement("button", "link-button danger", "Quitar estudiante");
     removeButton.type = "button";
     removeButton.addEventListener("click", () => removeStudent(student));
-    actions.append(removeButton);
-    identity.append(actions);
+    meta.append(removeButton);
   }
+  body.append(meta, renderEvents(student));
 
-  const totals = createElement("div", "totals-column");
-  totals.append(createElement("span", "field-label", "Tardanzas totales"));
-  totals.append(createElement("span", "late-total", String(student.lateTotal)));
-
-  card.append(identity, totals, renderEvents(student));
+  details.append(summary, body);
+  card.append(details);
   return card;
 }
 
-function renderGroup(rows) {
+function renderToday(members, model) {
+  elements.todayTitle.textContent = "Hoy · " + formatDayLong(model.today);
+
+  // Llegadas tarde de hoy, de la más reciente a la más antigua.
+  const lateToday = [];
+  members.forEach((student) => student.lateToday.forEach((event) => lateToday.push({ event, student })));
+  lateToday.sort((first, second) => second.event.timestamp - first.event.timestamp);
+  elements.todayLateCount.textContent = String(lateToday.length);
+  elements.todayLateList.replaceChildren();
+  if (!lateToday.length) {
+    elements.todayLateList.append(createElement("p", "today-empty", "Nadie de este grupo ha llegado tarde hoy."));
+  }
+  lateToday.forEach(({ event, student }) => {
+    const row = createElement("div", "today-row");
+    row.append(createElement("span", "today-time", clockLabel(event.time) || "—"));
+    const who = createElement("span", "today-who");
+    who.append(createElement("strong", "", student.name));
+    who.append(createElement("small", "", event.franja));
+    row.append(who);
+    const excuse = excusePresentation(event.justification);
+    row.append(createElement("span", "state-pill state-" + excuse.state, excuse.label));
+    if (canManage()) {
+      const button = createElement("button", "small-button", event.justification ? "Editar" : "Excusa");
+      button.type = "button";
+      button.setAttribute("aria-label", (event.justification ? "Editar excusa de " : "Agregar excusa de ") + student.name);
+      button.addEventListener("click", () => openExcuseDialog(event, student));
+      row.append(button);
+    }
+    elements.todayLateList.append(row);
+  });
+
+  // Faltas: estudiantes del grupo sin ninguna lectura hoy.
+  const absences = members.filter((student) => student.absentToday);
+  elements.faltasCount.textContent = String(absences.length);
+  elements.faltasContainer.replaceChildren();
+  if (!model.readingStarted) {
+    elements.faltasContainer.append(createElement(
+      "p",
+      "today-empty",
+      "Aún no hay lecturas del lector hoy. Las faltas aparecen cuando empieza el registro."
+    ));
+    return;
+  }
+  if (!absences.length) {
+    elements.faltasContainer.append(createElement("p", "today-empty", "Todos los estudiantes de este grupo tienen registro hoy."));
+    return;
+  }
+  absences.forEach((student) => {
+    const falta = { uid: student.uid, name: student.name, group: student.group, fecha: model.today, faltaExcuse: student.faltaExcuse };
+    const card = createElement("div", "falta-card today-row");
+    const who = createElement("span", "today-who");
+    who.append(createElement("strong", "falta-name", student.name));
+    card.append(who);
+    const excuse = faltaExcusePresentation(falta);
+    const pill = createElement("span", "state-pill state-" + (excuse.state === "empty" ? "falta" : excuse.state), excuse.state === "empty" ? "Sin excusa" : excuse.label);
+    if (excuse.detail) pill.title = excuse.detail;
+    card.append(pill);
+    if (canManage()) {
+      const button = createElement("button", "small-button", falta.faltaExcuse ? "Editar" : "Excusa");
+      button.type = "button";
+      button.setAttribute("aria-label", (falta.faltaExcuse ? "Editar excusa de la falta de " : "Agregar excusa a la falta de ") + student.name);
+      button.addEventListener("click", () => openFaltaExcuseDialog(falta));
+      card.append(button);
+    }
+    elements.faltasContainer.append(card);
+  });
+}
+
+function renderGroup(model) {
+  const rows = model.rows;
+  const search = searchText(state.search);
+  const isSearching = Boolean(search);
+
   const groupMembers = rows
     .filter((student) => student.group === state.activeGroup)
     .sort((first, second) => groupCollator.compare(first.name, second.name));
-  const search = searchText(state.search);
-  const studentMatchesSearch = (student) => {
-    return !search ||
-      searchText(student.name).includes(search) ||
-      searchText(student.group).includes(search) ||
-      searchText(student.uid).includes(search);
-  };
-  const isSearching = Boolean(search);
-  const visibleMembers = (isSearching ? rows : groupMembers)
-    .filter(studentMatchesSearch)
-    .sort((first, second) => {
-      if (isSearching && first.group !== second.group) {
-        return groupCollator.compare(first.group, second.group);
-      }
-      return groupCollator.compare(first.name, second.name);
-    });
+  const visibleMembers = isSearching
+    ? rows
+      .filter((student) =>
+        searchText(student.name).includes(search) ||
+        searchText(student.group).includes(search) ||
+        searchText(student.uid).includes(search))
+      .sort((first, second) => {
+        if (first.group !== second.group) return groupCollator.compare(first.group, second.group);
+        return groupCollator.compare(first.name, second.name);
+      })
+    : groupMembers;
 
-  elements.activeGroupTitle.textContent = isSearching
-    ? "Resultados de búsqueda"
-    : "Grupo " + state.activeGroup;
-  elements.activeGroupCount.textContent = isSearching
-    ? String(visibleMembers.length) + " resultado" + (visibleMembers.length === 1 ? "" : "s")
-    : String(groupMembers.length) + " estudiante" + (groupMembers.length === 1 ? "" : "s");
+  elements.todaySection.hidden = isSearching;
+  elements.groupReportButton.hidden = isSearching;
+  elements.activeGroupLabel.textContent = isSearching ? "Búsqueda en todos los grupos" : "Grupo seleccionado";
+  elements.activeGroupTitle.textContent = isSearching ? "Resultados de «" + state.search + "»" : "Grupo " + state.activeGroup;
+
+  if (isSearching) {
+    elements.activeGroupCount.textContent = plural(visibleMembers.length, "resultado", "resultados");
+  } else {
+    const monthTotal = groupMembers.reduce((total, student) => total + student.lateThisMonth, 0);
+    elements.activeGroupCount.textContent =
+      plural(groupMembers.length, "estudiante", "estudiantes") + " · " +
+      plural(monthTotal, "llegada tarde", "llegadas tarde") + " este mes";
+    renderToday(groupMembers, model);
+  }
+
+  elements.studentsHeading.textContent = isSearching ? "Estudiantes encontrados" : "Estudiantes del grupo";
   elements.studentsContainer.replaceChildren();
 
   if (!visibleMembers.length) {
@@ -695,16 +879,19 @@ function renderGroup(rows) {
       "p",
       "",
       isSearching
-        ? "Prueba con otro nombre, grupo o UID."
+        ? "Prueba con otro nombre o con el código de la tarjeta."
         : canManage()
-          ? "Usa “Añadir estudiante” para registrar el primer estudiante de este grupo."
-          : "Cuando administración registre estudiantes, aparecerán aquí automáticamente."
+          ? "Usa «Añadir estudiante» para registrar el primer estudiante de este grupo."
+          : "Cuando coordinación registre estudiantes, aparecerán aquí automáticamente."
     ));
     elements.studentsContainer.append(empty);
     return;
   }
 
-  visibleMembers.forEach((student) => elements.studentsContainer.append(renderStudent(student, isSearching)));
+  const expand = isSearching && visibleMembers.length <= SEARCH_AUTO_EXPAND;
+  visibleMembers.forEach((student) => {
+    elements.studentsContainer.append(renderStudent(student, { showGroup: isSearching, expand }));
+  });
 }
 
 /* ---------- Sistema de faltas (inasistencias) ---------- */
@@ -713,145 +900,70 @@ function faltaKey(fecha, uid) {
   return fecha + "_" + uid;
 }
 
-function computeAbsences() {
-  const today = todayKey();
-  // Recopilar UIDs de estudiantes que tienen CUALQUIER registro hoy (tarde o puntual)
-  const presentToday = new Set();
-  Object.values(state.records).forEach((record) => {
-    if (!record || typeof record !== "object") return;
-    if (text(record.fecha) === today && record.uid) {
-      presentToday.add(uidKey(record.uid));
-    }
-  });
-
-  return Object.entries(state.students)
-    .filter((entry) => entry[1] && typeof entry[1] === "object")
-    .map(([uid, student]) => {
-      const key = uidKey(uid);
-      return {
-        uid: key || text(uid).toUpperCase(),
-        name: text(student.nombre) || "Sin nombre",
-        group: normalizeGroup(student.grupo),
-        fecha: today,
-        present: presentToday.has(key),
-        faltaExcuse: state.faltas[faltaKey(today, key)] || null
-      };
-    })
-    .filter((student) => !student.present && student.group);
-}
-
-function renderFaltaExcuse(falta) {
+function faltaExcusePresentation(falta) {
   if (!falta.faltaExcuse || !falta.faltaExcuse.justificacion) {
-    return { state: "empty", label: "Sin excusa", detail: "No se ha registrado motivo." };
+    return { state: "empty", label: "Sin excusa", detail: "" };
   }
-  const justification = falta.faltaExcuse.justificacion;
-  const stateName = text(justification.estado);
-  return {
-    state: EXCUSE_LABELS[stateName] ? stateName : "pendiente",
-    label: EXCUSE_LABELS[stateName] || "Pendiente",
-    detail: text(justification.motivo) || "Sin motivo escrito."
-  };
+  return excusePresentation(falta.faltaExcuse.justificacion);
 }
 
-function renderAbsences() {
-  const container = document.querySelector("#faltasContainer");
-  const countEl = document.querySelector("#faltasCount");
-  if (!container || !countEl) return;
+function getExcuseStatus() {
+  const checked = elements.excuseStatusInputs.find((input) => input.checked);
+  return checked ? checked.value : "";
+}
 
-  const allAbsences = computeAbsences();
-  const search = searchText(state.search);
-  const isSearching = Boolean(search);
-
-  const absences = (isSearching
-    ? allAbsences.filter((f) =>
-        searchText(f.name).includes(search) ||
-        searchText(f.group).includes(search) ||
-        searchText(f.uid).includes(search))
-    : allAbsences.filter((f) => f.group === state.activeGroup)
-  ).sort((a, b) => groupCollator.compare(a.name, b.name));
-
-  countEl.textContent = String(absences.length) + " falta" + (absences.length === 1 ? "" : "s") + " hoy";
-  container.replaceChildren();
-
-  if (!absences.length) {
-    const msg = isSearching
-      ? "No hay faltas que coincidan con la búsqueda."
-      : "Todos los estudiantes de este grupo tienen registro hoy, o aún no hay estudiantes.";
-    container.append(createElement("p", "events-empty", msg));
-    return;
-  }
-
-  absences.forEach((falta) => {
-    const card = createElement("article", "falta-card");
-    const identity = createElement("div", "falta-identity");
-    identity.append(createElement("h4", "falta-name", falta.name));
-    if (isSearching) identity.append(createElement("span", "falta-group", "Grupo " + falta.group));
-    identity.append(createElement("span", "uid-text", "UID: " + falta.uid));
-
-    const statusArea = createElement("div", "falta-status");
-    statusArea.append(createElement("span", "state-pill state-falta", "Falta"));
-    const excuse = renderFaltaExcuse(falta);
-    if (excuse.state !== "empty") {
-      statusArea.append(createElement("span", "state-pill state-" + excuse.state, excuse.label));
-      statusArea.append(createElement("p", "falta-reason", excuse.detail));
-    }
-
-    card.append(identity, statusArea);
-
-    if (canManage()) {
-      const actions = createElement("div", "falta-actions");
-      const excuseBtn = createElement("button", "small-button", falta.faltaExcuse ? "Editar excusa" : "Agregar excusa");
-      excuseBtn.type = "button";
-      excuseBtn.addEventListener("click", () => openFaltaExcuseDialog(falta));
-      actions.append(excuseBtn);
-      card.append(actions);
-    }
-
-    container.append(card);
+function setExcuseStatus(value) {
+  const status = EXCUSE_LABELS[value] ? value : "pendiente";
+  elements.excuseStatusInputs.forEach((input) => {
+    input.checked = input.value === status;
   });
+}
+
+function prepareExcuseDialog(kind, info, justification) {
+  const isFalta = kind === "falta";
+  elements.excuseDialogEyebrow.textContent = isFalta ? "Falta" : "Llegada tarde";
+  elements.excuseDialogTitle.textContent = justification
+    ? (isFalta ? "Editar excusa de la falta" : "Editar excusa")
+    : (isFalta ? "Agregar excusa a la falta" : "Agregar excusa");
+  elements.excuseReasonLabel.textContent = isFalta ? "Motivo de la falta" : "Motivo de la llegada tarde";
+  elements.excuseRecordInfo.textContent = info;
+  setExcuseStatus(justification ? text(justification.estado) : "pendiente");
+  elements.excuseReasonInput.value = justification ? text(justification.motivo) : "";
+  elements.deleteExcuseButton.hidden = !justification;
+  // Las fotos de evidencia sólo existen para llegadas tarde.
+  elements.evidenceSection.hidden = isFalta;
+  showExcuseFormError("");
 }
 
 function openFaltaExcuseDialog(falta) {
   if (!canManage()) return;
-  const key = faltaKey(falta.fecha, falta.uid);
-  state.editingFaltaKey = key;
+  state.editingFalta = falta;
   state.editingRecordId = null; // No es un registro de tardanza
+  discardPendingEvidence(state.evidenceEditor);
+  state.evidenceEditor = null;
 
   const existing = falta.faltaExcuse && falta.faltaExcuse.justificacion;
-  elements.excuseRecordInfo.textContent =
-    falta.name + " · Grupo " + falta.group + " · Falta del " + falta.fecha;
-  elements.excuseStatusInput.value = existing && EXCUSE_LABELS[text(existing.estado)]
-    ? text(existing.estado)
-    : "pendiente";
-  elements.excuseReasonInput.value = existing ? text(existing.motivo) : "";
-  elements.deleteExcuseButton.hidden = !existing;
-  showExcuseFormError("");
-
-  // Desactivar evidencias para faltas (requiere plan pago)
-  const evidenceSection = document.querySelector("#evidenceSection");
-  if (evidenceSection) evidenceSection.hidden = true;
-
+  prepareExcuseDialog(
+    "falta",
+    falta.name + " · Grupo " + falta.group + " · Falta del " + formatDayLong(falta.fecha),
+    existing || null
+  );
   openDialog(elements.excuseDialog);
   elements.excuseReasonInput.focus();
 }
 
 async function saveFaltaExcuse(status, reason) {
-  const key = state.editingFaltaKey;
-  if (!canManage() || !key) return false;
-
-  const parts = key.split("_");
-  const fecha = parts[0];
-  const uid = parts.slice(1).join("_");
-  const student = state.students[uid];
+  const falta = state.editingFalta;
+  if (!canManage() || !falta) return false;
 
   elements.saveExcuseButton.disabled = true;
   showExcuseFormError("");
   try {
-    await set(ref(database, "faltas/" + key), {
-      uid: uid,
-      nombre: text(student && student.nombre) || "Sin nombre",
-      grupo: normalizeGroup(student && student.grupo) || "",
-      fecha: fecha,
+    await set(ref(database, "faltas/" + faltaKey(falta.fecha, falta.uid)), {
+      uid: falta.uid,
+      nombre: falta.name,
+      grupo: normalizeGroup(falta.group),
+      fecha: falta.fecha,
       justificacion: {
         estado: status,
         motivo: reason,
@@ -860,11 +972,11 @@ async function saveFaltaExcuse(status, reason) {
       }
     });
     closeDialog(elements.excuseDialog);
-    setStatus("Excusa de falta guardada.", false);
+    setStatus("Excusa de la falta guardada.", false);
     return true;
   } catch (error) {
     console.error("No fue posible guardar la excusa de falta", error);
-    showExcuseFormError("No se pudo guardar. Verifica tu rol y las reglas de Firebase.");
+    showExcuseFormError("No se pudo guardar. Verifica tu rol y que las reglas de Firebase estén publicadas.");
     return false;
   } finally {
     elements.saveExcuseButton.disabled = false;
@@ -872,15 +984,15 @@ async function saveFaltaExcuse(status, reason) {
 }
 
 async function deleteFaltaExcuse() {
-  const key = state.editingFaltaKey;
-  if (!canManage() || !key) return;
+  const falta = state.editingFalta;
+  if (!canManage() || !falta) return;
   if (!window.confirm("¿Quitar la excusa de esta falta?")) return;
 
   elements.deleteExcuseButton.disabled = true;
   try {
-    await remove(ref(database, "faltas/" + key));
+    await remove(ref(database, "faltas/" + faltaKey(falta.fecha, falta.uid)));
     closeDialog(elements.excuseDialog);
-    setStatus("Excusa de falta retirada.", false);
+    setStatus("Excusa de la falta retirada.", false);
   } catch (error) {
     console.error("No fue posible quitar la excusa de falta", error);
     showExcuseFormError("No se pudo quitar. Inténtalo de nuevo.");
@@ -890,12 +1002,10 @@ async function deleteFaltaExcuse() {
 }
 
 function render() {
-  const rows = studentRows();
-  renderSummary(rows);
-  renderWarning(rows);
-  renderTabs(rows);
-  renderGroup(rows);
-  renderAbsences();
+  const model = buildModel();
+  renderWarning(model.rows);
+  renderGroupPicker(model.rows);
+  renderGroup(model);
   statsView.refresh();
 }
 
@@ -927,40 +1037,15 @@ function openExcuseDialog(event, student) {
   if (!canManage()) return;
 
   state.editingRecordId = event.id;
-  state.editingFaltaKey = null;
-  const justification = event.justification || {};
-  elements.excuseRecordInfo.textContent =
-    student.name + " · Grupo " + student.group + " · " + event.exactDate;
-  elements.excuseStatusInput.value = EXCUSE_LABELS[text(justification.estado)]
-    ? text(justification.estado)
-    : "pendiente";
-  elements.excuseReasonInput.value = text(justification.motivo);
-  elements.deleteExcuseButton.hidden = !event.justification;
-  showExcuseFormError("");
+  state.editingFalta = null;
+  prepareExcuseDialog(
+    "tarde",
+    student.name + " · Grupo " + student.group + " · " + event.exactDate + " · " + event.franja,
+    event.justification
+  );
   openEvidenceEditor(event);
   openDialog(elements.excuseDialog);
   elements.excuseReasonInput.focus();
-}
-
-async function refreshData() {
-  if (!state.authUser) return;
-  elements.refreshButton.disabled = true;
-  setStatus("Actualizando datos…", false);
-  try {
-    const results = await Promise.all([
-      get(ref(database, "estudiantes")),
-      get(ref(database, "registros"))
-    ]);
-    state.students = results[0].val() || {};
-    state.records = results[1].val() || {};
-    render();
-    setStatus("Actualizado manualmente.", false);
-  } catch (error) {
-    console.error("No fue posible actualizar el panel", error);
-    setStatus("No fue posible actualizar. Revisa tu conexión o las reglas de Firebase.", true);
-  } finally {
-    elements.refreshButton.disabled = false;
-  }
 }
 
 async function removeStudent(student) {
@@ -1026,7 +1111,7 @@ async function saveExcuse(event) {
   event.preventDefault();
   if (!canManage()) return;
 
-  const status = text(elements.excuseStatusInput.value);
+  const status = getExcuseStatus();
   const reason = text(elements.excuseReasonInput.value);
   if (!EXCUSE_LABELS[status]) {
     showExcuseFormError("Selecciona un estado válido.");
@@ -1038,7 +1123,7 @@ async function saveExcuse(event) {
   }
 
   // Si se está editando una falta, usar el flujo de faltas.
-  if (state.editingFaltaKey && !state.editingRecordId) {
+  if (state.editingFalta && !state.editingRecordId) {
     await saveFaltaExcuse(status, reason);
     return;
   }
@@ -1082,7 +1167,7 @@ async function deleteExcuse() {
   if (!canManage()) return;
 
   // Si se está editando una falta, usar el flujo de faltas.
-  if (state.editingFaltaKey && !state.editingRecordId) {
+  if (state.editingFalta && !state.editingRecordId) {
     await deleteFaltaExcuse();
     return;
   }
@@ -1195,7 +1280,7 @@ async function handleEvidenceFile(file) {
     editor.pending = prepared;
     editor.pendingUrl = URL.createObjectURL(prepared.full);
     setEvidenceStatus(
-      "Foto lista (" + formatBytes(prepared.full.size) + "). Se subirá al pulsar “Guardar revisión”.",
+      "Foto lista (" + formatBytes(prepared.full.size) + "). Se subirá al pulsar «Guardar».",
       "ready"
     );
   } catch (error) {
@@ -1508,10 +1593,13 @@ elements.searchInput.addEventListener("input", (event) => {
   state.search = text(event.target.value);
   render();
 });
-elements.refreshButton.addEventListener("click", refreshData);
 elements.addStudentButton.addEventListener("click", openStudentDialog);
 elements.statsButton.addEventListener("click", () => {
   if (isActiveStaff(state.profile)) statsView.open();
+});
+// Atajo: el informe del mes del grupo que se está viendo.
+elements.groupReportButton.addEventListener("click", () => {
+  if (isActiveStaff(state.profile)) statsView.open({ period: "mes", group: state.activeGroup });
 });
 elements.studentForm.addEventListener("submit", saveStudent);
 elements.excuseForm.addEventListener("submit", saveExcuse);
@@ -1623,7 +1711,9 @@ onAuthStateChanged(auth, async (user) => {
   state.authUser = null;
   state.profile = null;
   state.editingRecordId = null;
-  state.editingFaltaKey = null;
+  state.editingFalta = null;
+  state.openStudents.clear();
+  state.openMonths.clear();
   state.managedUsers = [];
   state.editingUserUid = null;
 

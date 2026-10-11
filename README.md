@@ -4,10 +4,13 @@ Panel web para consultar en vivo los estudiantes y las llegadas tarde que regist
 
 ## Qué incluye
 
-- 18 pestañas fijas: 6.1 a 11.3.
-- Cada estudiante aparece automáticamente en su pestaña cuando se agrega en Firebase.
-- Tardanzas separadas por mes, con fecha y hora exactas.
-- Inicio de sesión con correo y contraseña de Firebase.
+- **Elegir grupo con un toque:** los 18 grupos (6.1 a 11.3) ordenados por grado. El panel recuerda en ese navegador el último grupo consultado.
+- **Hoy, primero:** al abrir un grupo se ve quién llegó tarde hoy (con hora y franja) y quién no tiene ninguna lectura del lector (faltas). Si nadie ha pasado la tarjeta en todo el colegio (fin de semana, festivo o muy temprano) no se marcan faltas.
+- **Lista de estudiantes plegable:** cada fila muestra el total de llegadas tarde y las de este mes; al tocar el nombre se ven sus llegadas tarde por mes, con la excusa, la foto y el código de la tarjeta. Lo que se abrió sigue abierto aunque lleguen lecturas nuevas en vivo.
+- **Buscar** por nombre o código de tarjeta en todos los grupos (sin importar tildes). Con pocos resultados, el detalle se abre solo.
+- **Informe del grupo:** abre «Informes y Excel» con el mes actual y el grupo ya filtrados.
+- Inicio de sesión con correo y contraseña de Firebase; la sesión se cierra tras 25 minutos sin actividad.
+- Funciona en computador, tableta y celular (botones de al menos 44 px).
 - Tres roles reales:
 
 | Rol | Puede ver | Puede añadir/quitar estudiantes | Puede revisar excusas |
@@ -16,9 +19,13 @@ Panel web para consultar en vivo los estudiantes y las llegadas tarde que regist
 | Directivo | Todo el panel | Sí | Sí |
 | Administrador | Todo el panel | Sí | Sí, y administrar las cuentas de personal |
 
-Además, los tres roles pueden abrir **Estadísticas y Excel** y ver las fotos de evidencia; sólo directivo y administrador pueden adjuntar, reemplazar o quitar fotos (ver la sección [Funciones añadidas en octubre de 2026](#funciones-añadidas-en-octubre-de-2026)).
+Además, los tres roles pueden abrir **Informes y Excel** y ver las fotos de evidencia; sólo directivo y administrador pueden adjuntar, reemplazar o quitar fotos (ver la sección [Funciones añadidas en octubre de 2026](#funciones-añadidas-en-octubre-de-2026)).
 
-Los botones se ocultan para docentes y las reglas de Realtime Database también bloquean las escrituras aunque alguien intente usar las herramientas del navegador. El aviso verde muestra siempre el rol que inició sesión. Al iniciar sesión, la pantalla de acceso se oculta por completo.
+Los botones se ocultan para docentes y las reglas de Realtime Database también bloquean las escrituras aunque alguien intente usar las herramientas del navegador. Junto al nombre se muestra siempre el rol que inició sesión. Al iniciar sesión, la pantalla de acceso se oculta por completo.
+
+### Excusas de faltas
+
+Directivo y administrador pueden agregar, editar o quitar la excusa de una falta desde la tarjeta «Faltas» de «Hoy». Se guarda en `faltas/<fecha>_<uid>` con `uid`, `nombre`, `grupo`, `fecha` y `justificacion` (igual que la de una llegada tarde). **Requiere publicar el `database.rules.json` actual**: la versión anterior no tenía reglas para `faltas`, así que Firebase rechazaba esas excusas y nadie podía leerlas.
 
 Al quitar un estudiante se borra solamente su ficha de estudiantes. Sus tardanzas históricas permanecen visibles en los registros existentes.
 
@@ -59,7 +66,7 @@ En Realtime Database crea un nodo llamado usuarios. Dentro crea una clave por ca
       }
     }
 
-Los únicos valores válidos de rol son docente, directivo y admin. Crea primero este administrador desde Firebase Console. Después de publicar la función del paso siguiente, ese administrador podrá crear, editar, desactivar o quitar las demás cuentas desde el botón **Administrar usuarios** del panel.
+Los únicos valores válidos de rol son docente, directivo y admin. Crea primero este administrador desde Firebase Console. Después de publicar la función del paso siguiente, ese administrador podrá crear, editar, desactivar o quitar las demás cuentas desde el botón **Usuarios** del panel.
 
 ### 4. Publicar la función de administración de usuarios
 
@@ -77,7 +84,7 @@ La web no puede administrar contraseñas directamente: sería inseguro exponer e
 3. Acepta la habilitación de Cloud Functions si Firebase la solicita. Normalmente requiere el plan Blaze, aunque el uso pequeño de esta beta suele mantenerse dentro de la cuota gratuita.
 4. Publica la web actualizada en Vercel como lo haces normalmente.
 
-Una vez publicada, inicia sesión con el administrador. En la esquina superior aparecerá **Administrar usuarios**. Desde ese cuadro puedes crear correo, contraseña, rol y estado; editar correo, rol o contraseña; y quitar cuentas. Las contraseñas nunca se guardan ni se muestran en Realtime Database.
+Una vez publicada, inicia sesión con el administrador. En la esquina superior aparecerá **Usuarios**. Desde ese cuadro puedes crear correo, contraseña, rol y estado; editar correo, rol o contraseña; y quitar cuentas. Las contraseñas nunca se guardan ni se muestran en Realtime Database.
 
 ### 5. Corregir los datos anteriores antes de activar las reglas
 
@@ -137,11 +144,11 @@ Para publicar, sube estos archivos a Firebase Hosting, Netlify, GitHub Pages o u
 ## Prueba recomendada
 
 1. Inicia sesión con una cuenta docente: debe poder ver grupos, tardanzas, motivos y estados, sin botones de modificación.
-2. Inicia sesión con una cuenta directivo: debe aparecer Añadir estudiante, Quitar estudiante y Validar excusa.
-3. Agrega una ficha de prueba al grupo 6.1 y comprueba que aparece al instante en su pestaña.
+2. Inicia sesión con una cuenta directivo: debe aparecer Añadir estudiante, Quitar estudiante (dentro del detalle de cada estudiante) y Agregar excusa.
+3. Agrega una ficha de prueba al grupo 6.1 y comprueba que aparece al instante al elegir ese grupo.
 4. Acerca su tarjeta al lector Android y confirma que la tardanza aparece en el mes correspondiente.
 5. Valida o rechaza la excusa y vuelve a entrar con una cuenta docente para confirmar que sólo puede leerla.
-6. Inicia sesión con el administrador y abre **Administrar usuarios**. Crea una cuenta docente de prueba, edítala, y confirma que un docente no ve ese botón.
+6. Inicia sesión con el administrador y abre **Usuarios**. Crea una cuenta docente de prueba, edítala, y confirma que un docente no ve ese botón.
 
 ## Estructura nueva de una justificación
 
@@ -161,9 +168,9 @@ El panel crea, edita o quita este campo sólo para los roles directivo y admin.
 
 ## Funciones añadidas en octubre de 2026
 
-### Estadísticas y Excel (todos los roles)
+### Informes y Excel (todos los roles)
 
-El botón **Estadísticas y Excel**, junto a «Actualizar», abre una consulta de llegadas tarde:
+El botón **Informes y Excel**, junto al buscador, abre una consulta de llegadas tarde:
 
 - **Periodo:** Hoy, Esta semana, Este mes, Mes anterior, Otro día, Otra semana y Otro mes.
 - **Filtros combinables:** grupo, franja (entrada, descanso 1, descanso 2 y cualquier otra que aparezca en los datos), estado de la excusa (sin excusa, pendiente, validada, rechazada) y nombre del estudiante (sin importar tildes ni mayúsculas).
@@ -182,7 +189,7 @@ Reglas de cálculo:
 ### Fotos de evidencia en las excusas
 
 - **Quién:** directivo y administrador adjuntan, reemplazan o quitan la foto desde el mismo cuadro donde validan la excusa, igual que hoy son los únicos que revisan excusas. Docente, directivo y administrador **ven** la foto: miniatura al lado de la excusa que se amplía al tocarla.
-- **Cómo se adjunta:** en el celular, con «Tomar foto» (abre la cámara trasera) o «Elegir archivo» (galería); en el computador, con «Elegir archivo» o arrastrando la imagen al recuadro. La foto se sube al pulsar «Guardar revisión». Si la excusa aún no existía, se guardan juntas.
+- **Cómo se adjunta:** en el celular, con «Tomar foto» (abre la cámara trasera) o «Elegir archivo» (galería); en el computador, con «Elegir archivo» o arrastrando la imagen al recuadro. La foto se sube al pulsar «Guardar». Si la excusa aún no existía, se guardan juntas.
 - **Preparación en el navegador:** corrige la orientación, reduce a máximo 1600 px, recomprime a JPEG (normalmente menos de 900 KB) y descarta los metadatos de la foto, incluida la ubicación GPS. Se aceptan JPG, PNG, WEBP y HEIC cuando el navegador puede abrirlo (Safari en iPhone convierte HEIC automáticamente). Los PDF y las imágenes de más de 25 MB se rechazan con un mensaje claro.
 - **Errores:** si la subida falla, la excusa queda guardada, el cuadro sigue abierto y aparece **Reintentar subida**.
 - **Privacidad:** las imágenes están en Cloud Storage **sin ningún acceso directo** (las reglas de `storage.rules` lo niegan todo) y sin URL públicas. Sólo la Cloud Function `evidencias` las lee o escribe, y en cada solicitud comprueba en `/usuarios` que la cuenta esté activa y tenga el rol adecuado. Una cuenta desactivada pierde el acceso de inmediato. Al cerrar sesión, el navegador borra de la memoria las imágenes que había mostrado.
@@ -208,7 +215,7 @@ Sólo la Cloud Function escribe en ambos lugares. Las reglas de `/registros` só
 
 ## Pasos manuales para activar las funciones nuevas
 
-**Estadísticas y Excel funcionan apenas se publique la web en Vercel; no requieren nada en Firebase.** Los pasos siguientes son para las fotos de evidencia y para que «Administrar usuarios» funcione (hoy su función no está publicada).
+**Informes y Excel funciona apenas se publique la web en Vercel; no requiere nada en Firebase.** Los pasos siguientes son para las fotos de evidencia y para que «Usuarios» funcione (hoy su función no está publicada).
 
 ### A. Antes de empezar
 
@@ -257,11 +264,11 @@ Sólo la Cloud Function escribe en ambos lugares. Las reglas de `/registros` só
 
 ### E. Comprobación manual (unos 10 minutos)
 
-13. **Docente:** entra y abre **Estadísticas y Excel**. Prueba Hoy, Esta semana y Mes anterior, y descarga el Excel. Comprueba que el total del archivo coincide con la pantalla. No debe ver botones para editar excusas ni subir fotos.
+13. **Docente:** entra y abre **Informes y Excel**. Prueba Hoy, Esta semana y Mes anterior, y descarga el Excel. Comprueba que el total del archivo coincide con la pantalla. No debe ver botones para editar excusas ni subir fotos.
 14. **Directivo:** abre una llegada tarde con excusa y pulsa **Editar excusa**. Adjunta una foto desde el celular (cámara) y otra desde el computador (arrastrándola). La miniatura debe aparecer junto a la excusa; al tocarla, se amplía. Reemplázala y luego quítala.
 15. **Docente de nuevo:** la miniatura aparece y se amplía, pero no hay botones de edición.
-16. **Administrador:** abre **Administrar usuarios**, desactiva una cuenta de prueba y verifica que ya no puede entrar.
-17. **Lector Android:** registra una llegada tarde con una tarjeta de prueba. Debe aparecer en el panel y en **Estadísticas › Hoy**.
+16. **Administrador:** abre **Usuarios**, desactiva una cuenta de prueba y verifica que ya no puede entrar.
+17. **Lector Android:** registra una llegada tarde con una tarjeta de prueba. Debe aparecer en el panel y en **Informes y Excel › Hoy**.
 
 ### Si algo falla
 

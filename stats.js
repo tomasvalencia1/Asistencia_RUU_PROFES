@@ -217,10 +217,15 @@ export function createStatsView(options) {
     refresh();
   }
 
-  function open() {
+  /* preset opcional: { period, group } para abrir directamente, por ejemplo, el mes de un grupo. */
+  function open(preset) {
     const today = todayKey();
     if (!nodes.dayInput.value) nodes.dayInput.value = today;
     if (!nodes.weekInput.value) nodes.weekInput.value = today;
+    if (preset && preset.period) {
+      nodes.periodInputs.forEach((input) => { input.checked = input.value === preset.period; });
+    }
+    if (preset && preset.group !== undefined) nodes.groupInput.value = preset.group;
     if (nodes.exportStatus) {
       nodes.exportStatus.textContent = "";
       nodes.exportStatus.classList.remove("error");

@@ -40,6 +40,19 @@
       }
     },
 
+    "faltas": {
+      ".read": "auth != null && root.child('usuarios').child(auth.uid).child('activo').val() == true && (root.child('usuarios').child(auth.uid).child('rol').val() == 'docente' || root.child('usuarios').child(auth.uid).child('rol').val() == 'directivo' || root.child('usuarios').child(auth.uid).child('rol').val() == 'admin')",
+
+      "$faltaId": {
+        ".write": "auth != null && root.child('usuarios').child(auth.uid).child('activo').val() == true && (root.child('usuarios').child(auth.uid).child('rol').val() == 'directivo' || root.child('usuarios').child(auth.uid).child('rol').val() == 'admin')",
+        ".validate": "!newData.exists() || (newData.numChildren() == 5 && newData.hasChildren(['uid', 'nombre', 'grupo', 'fecha', 'justificacion']) && newData.child('uid').isString() && newData.child('uid').val().matches(/^[0-9A-Za-z]{1,32}$/) && newData.child('nombre').isString() && newData.child('nombre').val().length > 0 && newData.child('nombre').val().length <= 120 && newData.child('grupo').isString() && newData.child('grupo').val().matches(/^((6|7|8|9|10|11)\\.[1-3])?$/) && newData.child('fecha').isString() && newData.child('fecha').val().matches(/^20[0-9][0-9]-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$/) && $faltaId == newData.child('fecha').val() + '_' + newData.child('uid').val())",
+
+        "justificacion": {
+          ".validate": "newData.numChildren() == 4 && newData.hasChildren(['estado', 'motivo', 'revisadaPorUid', 'revisadaEn']) && newData.child('estado').isString() && (newData.child('estado').val() == 'pendiente' || newData.child('estado').val() == 'validada' || newData.child('estado').val() == 'rechazada') && newData.child('motivo').isString() && newData.child('motivo').val().length > 0 && newData.child('motivo').val().length <= 500 && newData.child('revisadaPorUid').isString() && newData.child('revisadaPorUid').val() == auth.uid && newData.child('revisadaEn').isNumber() && newData.child('revisadaEn').val() <= now"
+        }
+      }
+    },
+
     "evidencias": {
       ".read": "auth != null && root.child('usuarios').child(auth.uid).child('activo').val() == true && (root.child('usuarios').child(auth.uid).child('rol').val() == 'docente' || root.child('usuarios').child(auth.uid).child('rol').val() == 'directivo' || root.child('usuarios').child(auth.uid).child('rol').val() == 'admin')",
       ".write": false
