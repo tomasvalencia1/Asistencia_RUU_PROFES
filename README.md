@@ -25,7 +25,9 @@ Los botones se ocultan para docentes y las reglas de Realtime Database también 
 
 ### Excusas de faltas
 
-Directivo y administrador pueden agregar, editar o quitar la excusa de una falta desde la tarjeta «Faltas» de «Hoy». Se guarda en `faltas/<fecha>_<uid>` con `uid`, `nombre`, `grupo`, `fecha` y `justificacion` (igual que la de una llegada tarde). **Requiere publicar el `database.rules.json` actual**: la versión anterior no tenía reglas para `faltas`, así que Firebase rechazaba esas excusas y nadie podía leerlas.
+Directivo y administrador pueden agregar, editar o quitar la excusa de una falta desde la tarjeta «Faltas» de «Hoy». Se guarda en `faltas/<fecha>_<uid>` con `uid`, `nombre`, `grupo`, `fecha` y `justificacion` (igual que la de una llegada tarde). Las reglas de `faltas` validan además que la clave sea `<fecha>_<uid>`, que la excusa quede a nombre de quien la revisa y que no haya campos extra.
+
+Nota sobre las reglas: Realtime Database no tiene `numChildren()`. Por eso las versiones anteriores de `database.rules.json` no se podían publicar tal cual y en la consola se habían quitado a mano; este archivo ya coincide con lo publicado. Para impedir campos extra se declaran los campos permitidos y un comodín `"$otro": { ".validate": false }`.
 
 Al quitar un estudiante se borra solamente su ficha de estudiantes. Sus tardanzas históricas permanecen visibles en los registros existentes.
 
