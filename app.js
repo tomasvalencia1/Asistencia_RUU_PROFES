@@ -30,6 +30,7 @@ import {
   onValue,
   ref,
   remove,
+  serverTimestamp,
   set,
   update
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js";
@@ -678,7 +679,7 @@ async function saveNoClassPeriod(event) {
       hasta,
       motivo,
       creadoPorUid: state.authUser.uid,
-      creadoEn: Date.now()
+      creadoEn: serverTimestamp()
     });
     state.calendar.start = "";
     state.calendar.end = "";
@@ -1254,7 +1255,7 @@ async function saveFaltaExcuse(status, reason) {
         estado: status,
         motivo: reason,
         revisadaPorUid: state.authUser.uid,
-        revisadaEn: Date.now()
+        revisadaEn: serverTimestamp()
       }
     });
     closeDialog(elements.excuseDialog);
@@ -1430,7 +1431,7 @@ async function saveExcuse(event) {
           estado: status,
           motivo: reason,
           revisadaPorUid: state.authUser.uid,
-          revisadaEn: Date.now()
+          revisadaEn: serverTimestamp()
         }
       });
       if (editor) editor.justification = { estado: status, motivo: reason };

@@ -90,6 +90,8 @@ export async function signOut() {
 // firebase-database
 export function getDatabase() { return {}; }
 export function ref(database, path) { return { path: path || "" }; }
+// En Firebase real el servidor reemplaza este marcador por su hora; aquí se usa la del navegador.
+export function serverTimestamp() { return Date.now(); }
 export function onValue(reference, callback) {
   const listener = { path: reference.path, callback };
   listeners.add(listener);
