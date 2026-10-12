@@ -83,6 +83,9 @@
           "motivo": {
             ".validate": true
           },
+          "grupos": {
+            ".validate": "newData.isString() && newData.val().length <= 120 && newData.val().matches(/^(todos|(6|7|8|9|10|11)\\.[1-3](,(6|7|8|9|10|11)\\.[1-3])*)$/)"
+          },
           "creadoPorUid": {
             ".validate": true
           },

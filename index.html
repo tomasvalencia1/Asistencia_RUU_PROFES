@@ -347,7 +347,8 @@
           </div>
           <div id="calendarGrid" class="calendar-grid"></div>
           <div class="calendar-legend" aria-hidden="true">
-            <span class="legend-item legend-off">Sin clases</span>
+            <span class="legend-item legend-off">Todos sin clases</span>
+            <span class="legend-item legend-partial">Algunos grupos</span>
             <span class="legend-item legend-selected">Selección</span>
             <span class="legend-item legend-today">Hoy</span>
           </div>
@@ -366,6 +367,14 @@
               <input id="calendarTo" type="date" required>
             </label>
           </div>
+          <fieldset class="choice-fieldset">
+            <legend>¿Quiénes no tienen clase?</legend>
+            <div class="choice-row choice-row-two">
+              <label class="choice"><input type="radio" name="calendarScope" value="todos" checked><span>Todos los grupos</span></label>
+              <label class="choice"><input type="radio" name="calendarScope" value="algunos"><span>Solo algunos grupos</span></label>
+            </div>
+            <div id="calendarGroups" class="calendar-groups" hidden></div>
+          </fieldset>
           <label>
             <span>Motivo</span>
             <input id="calendarReason" type="text" list="calendarReasons" maxlength="120" required placeholder="Ej.: Semana de receso">

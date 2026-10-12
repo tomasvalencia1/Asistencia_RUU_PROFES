@@ -160,6 +160,8 @@ const elements = {
   calendarClear: document.querySelector("#calendarClear"),
   calendarSave: document.querySelector("#calendarSave"),
   calendarList: document.querySelector("#calendarList"),
+  calendarScopeInputs: [...document.querySelectorAll("input[name='calendarScope']")],
+  calendarGroups: document.querySelector("#calendarGroups"),
   faltasContainer: document.querySelector("#faltasContainer"),
   faltasCount: document.querySelector("#faltasCount"),
   studentsHeading: document.querySelector("#studentsHeading"),
@@ -478,23 +480,111 @@ function subscribeToData() {
 
 /* ---------- Días sin clases ---------- */
 
-// Periodos válidos ordenados por fecha: { id, desde, hasta, motivo }.
+// "todos" (o vacío, en periodos antiguos) = todos los grupos; si no, lista "6.1,7.2".
+function parseNoClassGroups(value) {
+  const raw = text(value);
+  if (!raw || raw === "todos") return null;
+  const groups = [...new Set(raw.split(",").map(normalizeGroup).filter(Boolean))];
+  return groups.length ? groups.sort(groupCollator.compare) : null;
+}
+
+// Periodos válidos ordenados por fecha: { id, desde, hasta, motivo, groups } (groups null = todos).
 function noClassList() {
   return Object.entries(state.noClassPeriods || {})
     .map(([id, period]) => ({
       id,
       desde: text(period && period.desde),
       hasta: text(period && period.hasta),
-      motivo: text(period && period.motivo) || "Sin clases"
+      motivo: text(period && period.motivo) || "Sin clases",
+      groups: parseNoClassGroups(period && period.grupos)
     }))
     .filter((period) => isDayKey(period.desde) && isDayKey(period.hasta) && period.hasta >= period.desde)
     .sort((first, second) => first.desde.localeCompare(second.desde));
 }
 
-// El periodo sin clases que incluye ese día (AAAA-MM-DD), o null.
-function noClassPeriodFor(day) {
+function noClassPeriodsOn(day) {
+  return noClassList().filter((period) => day >= period.desde && day <= period.hasta);
+}
+
+// El periodo sin clases de ese día que afecta a ese grupo, o null. Sin grupo sólo cuentan los de todos.
+function noClassPeriodFor(day, group) {
   if (!day) return null;
-  return noClassList().find((period) => day >= period.desde && day <= period.hasta) || null;
+  const target = normalizeGroup(group);
+  return noClassPeriodsOn(day).find((period) => !period.groups || (target && period.groups.includes(target))) || null;
+}
+
+// "Todos los grupos", "Grupo 6.1" o "Grupos: Sexto completo, 7.2".
+function groupsLabel(groups) {
+  if (!groups) return "Todos los grupos";
+  if (groups.length === 1) return "Grupo " + groups[0];
+  const parts = [];
+  GRADES.forEach(({ grade, label }) => {
+    const own = [1, 2, 3].map((section) => grade + "." + section).filter((group) => groups.includes(group));
+    if (own.length === 3) parts.push(label + " completo");
+    else parts.push(...own);
+  });
+  return "Grupos: " + parts.join(", ");
+}
+
+function buildCalendarGroupPicker() {
+  elements.calendarGroups.replaceChildren();
+  GRADES.forEach(({ grade, label }) => {
+    const row = createElement("div", "calendar-grade");
+    const all = createElement("label", "check-chip grade-all");
+    const allInput = createElement("input");
+    allInput.type = "checkbox";
+    allInput.dataset.grade = String(grade);
+    allInput.setAttribute("aria-label", "Todo " + label);
+    all.append(allInput, createElement("span", "", label));
+    row.append(all);
+    for (let section = 1; section <= 3; section += 1) {
+      const group = grade + "." + section;
+      const chip = createElement("label", "check-chip");
+      const input = createElement("input");
+      input.type = "checkbox";
+      input.value = group;
+      input.dataset.gradeOf = String(grade);
+      chip.append(input, createElement("span", "", group));
+      row.append(chip);
+    }
+    elements.calendarGroups.append(row);
+  });
+  elements.calendarGroups.addEventListener("change", (event) => {
+    const input = event.target;
+    if (input.dataset.grade) {
+      elements.calendarGroups.querySelectorAll("input[data-grade-of='" + input.dataset.grade + "']")
+        .forEach((box) => { box.checked = input.checked; });
+    }
+    syncGradeChecks();
+    showCalendarError("");
+  });
+}
+
+function syncGradeChecks() {
+  elements.calendarGroups.querySelectorAll("input[data-grade]").forEach((gradeBox) => {
+    const boxes = [...elements.calendarGroups.querySelectorAll("input[data-grade-of='" + gradeBox.dataset.grade + "']")];
+    const checked = boxes.filter((box) => box.checked).length;
+    gradeBox.checked = checked === boxes.length;
+    gradeBox.indeterminate = checked > 0 && checked < boxes.length;
+  });
+}
+
+function calendarScope() {
+  const checked = elements.calendarScopeInputs.find((input) => input.checked);
+  return checked ? checked.value : "todos";
+}
+
+function selectedCalendarGroups() {
+  return [...elements.calendarGroups.querySelectorAll("input[data-grade-of]:checked")].map((input) => input.value);
+}
+
+function resetCalendarGroups() {
+  elements.calendarScopeInputs.forEach((input) => { input.checked = input.value === "todos"; });
+  elements.calendarGroups.querySelectorAll("input").forEach((input) => {
+    input.checked = false;
+    input.indeterminate = false;
+  });
+  elements.calendarGroups.hidden = true;
 }
 
 function dayCount(desde, hasta) {
@@ -568,21 +658,23 @@ function renderCalendar() {
     const day = addDays(gridStart, index);
     // La sexta fila sólo se dibuja si todavía tiene días del mes.
     if (index === 35 && monthKeyOf(day) !== month) break;
-    const off = noClassPeriodFor(day);
+    const periods = noClassPeriodsOn(day);
+    const offAll = periods.some((period) => !period.groups);
     const selected = Boolean(from) && day >= from && day <= to;
     const cell = createElement(manager ? "button" : "span", "calendar-day", String(Number(day.slice(8))));
     cell.dataset.day = day;
     if (monthKeyOf(day) !== month) cell.classList.add("outside");
     if (weekdayFromMonday(day) >= 5) cell.classList.add("weekend");
     if (day === today) cell.classList.add("today");
-    if (off) {
-      cell.classList.add("off");
-      cell.title = off.motivo;
+    const offText = periods.map((period) => period.motivo + " (" + groupsLabel(period.groups) + ")").join("; ");
+    if (periods.length) {
+      cell.classList.add(offAll ? "off" : "off-partial");
+      cell.title = offText;
     }
     if (selected) cell.classList.add("selected");
     if (selected && day === from) cell.classList.add("range-start");
     if (selected && day === to) cell.classList.add("range-end");
-    const label = formatDayLong(day) + (off ? ", sin clases: " + off.motivo : "") + (day === today ? ", hoy" : "");
+    const label = formatDayLong(day) + (periods.length ? ", sin clases: " + offText : "") + (day === today ? ", hoy" : "");
     if (manager) {
       cell.type = "button";
       cell.setAttribute("aria-pressed", String(selected));
@@ -630,6 +722,7 @@ function renderNoClassList() {
       periodLabel(period) + " · " + plural(dayCount(period.desde, period.hasta), "día", "días") +
         (isNow ? " · en curso" : isPast ? " · pasado" : "")
     ));
+    info.append(createElement("span", "calendar-item-groups" + (period.groups ? "" : " all"), groupsLabel(period.groups)));
     const actions = createElement("div", "calendar-item-actions");
     const show = createElement("button", "small-button", "Ver");
     show.type = "button";
@@ -670,6 +763,11 @@ async function saveNoClassPeriod(event) {
     showCalendarError("Un periodo puede tener máximo 120 días. Divídelo en partes.");
     return;
   }
+  const groups = calendarScope() === "todos" ? null : selectedCalendarGroups();
+  if (groups && !groups.length) {
+    showCalendarError("Marca los grupos que no tienen clase, o elige «Todos los grupos».");
+    return;
+  }
 
   elements.calendarSave.disabled = true;
   showCalendarError("");
@@ -678,13 +776,15 @@ async function saveNoClassPeriod(event) {
       desde,
       hasta,
       motivo,
+      grupos: groups ? groups.join(",") : "todos",
       creadoPorUid: state.authUser.uid,
       creadoEn: serverTimestamp()
     });
     state.calendar.start = "";
     state.calendar.end = "";
-    state.calendar.notice = "Guardado: " + motivo + " (" + periodLabel({ desde, hasta }) + ").";
+    state.calendar.notice = "Guardado: " + motivo + " · " + groupsLabel(groups) + " (" + periodLabel({ desde, hasta }) + ").";
     elements.calendarReason.value = "";
+    resetCalendarGroups();
     renderCalendar();
   } catch (error) {
     console.error("No fue posible guardar los días sin clases", error);
@@ -777,8 +877,10 @@ function indexRecords() {
     const day = recordDay(rawRecord);
     if (day === today) presentToday.add(uid);
     if (rawRecord.tarde !== true && rawRecord.tarde !== "true") return;
-    // En días sin clases no se cuentan llegadas tarde.
-    if (noClassPeriodFor(day)) return;
+    // En días sin clases (de todos o de su grupo) no se cuentan llegadas tarde.
+    const student = state.students[rawRecord.uid] || state.students[uid];
+    const recordGroup = normalizeGroup(rawRecord.grupo) || normalizeGroup(student && student.grupo);
+    if (noClassPeriodFor(day, recordGroup)) return;
 
     const justification = rawRecord.justificacion && typeof rawRecord.justificacion === "object"
       ? rawRecord.justificacion
@@ -809,9 +911,9 @@ function indexRecords() {
 function buildModel() {
   const index = indexRecords();
   const currentMonth = index.today.slice(0, 7);
-  // Sin faltas en días sin clases ni si nadie ha pasado la tarjeta hoy (fin de semana o muy temprano).
-  const todayOff = noClassPeriodFor(index.today);
-  const readingStarted = !todayOff && index.presentToday.size > 0;
+  // No se marcan faltas si nadie ha pasado la tarjeta hoy (fin de semana o muy temprano)
+  // ni a los grupos que hoy no tienen clase.
+  const readingStarted = index.presentToday.size > 0;
   const rows = Object.entries(state.students)
     .filter((entry) => entry[1] && typeof entry[1] === "object")
     .map(([uid, rawStudent]) => {
@@ -819,12 +921,13 @@ function buildModel() {
       const lateEvents = index.lateByUid.get(key) || [];
       const studentUid = key || text(uid).toUpperCase();
       const lateToday = lateEvents.filter((event) => event.day === index.today);
-      const absentToday = readingStarted && !index.presentToday.has(key);
+      const group = normalizeGroup(rawStudent.grupo);
+      const absentToday = readingStarted && !index.presentToday.has(key) && !noClassPeriodFor(index.today, group);
       return {
         uid: studentUid,
         name: text(rawStudent.nombre) || "Sin nombre",
         rawGroup: text(rawStudent.grupo),
-        group: normalizeGroup(rawStudent.grupo),
+        group,
         lateEvents,
         lateThisMonth: lateEvents.filter((event) => event.month === currentMonth).length,
         lateToday,
@@ -832,7 +935,7 @@ function buildModel() {
         faltaExcuse: state.faltas[faltaKey(index.today, studentUid)] || null
       };
     });
-  return { today: index.today, todayOff, readingStarted, rows };
+  return { today: index.today, readingStarted, rows };
 }
 
 /* ---------- Presentación ---------- */
@@ -1048,11 +1151,12 @@ function renderStudent(student, options) {
 
 function renderToday(members, model) {
   elements.todayTitle.textContent = "Hoy · " + formatDayLong(model.today);
-  elements.todayOffNotice.hidden = !model.todayOff;
-  elements.todayGrid.hidden = Boolean(model.todayOff);
-  if (model.todayOff) {
-    elements.todayOffNotice.textContent = "Hoy no hay clases: " + model.todayOff.motivo +
-      ". No se cuentan llegadas tarde ni faltas.";
+  const off = noClassPeriodFor(model.today, state.activeGroup);
+  elements.todayOffNotice.hidden = !off;
+  elements.todayGrid.hidden = Boolean(off);
+  if (off) {
+    elements.todayOffNotice.textContent = (off.groups ? "Hoy el grupo " + state.activeGroup + " no tiene clases: " : "Hoy no hay clases: ") +
+      off.motivo + ". No se cuentan llegadas tarde ni faltas.";
     return;
   }
 
@@ -1891,10 +1995,18 @@ elements.calendarButton.addEventListener("click", () => {
 elements.calendarPrev.addEventListener("click", () => moveCalendar(-1));
 elements.calendarNext.addEventListener("click", () => moveCalendar(1));
 elements.calendarForm.addEventListener("submit", saveNoClassPeriod);
+elements.calendarScopeInputs.forEach((input) => {
+  input.addEventListener("change", () => {
+    elements.calendarGroups.hidden = calendarScope() === "todos";
+    showCalendarError("");
+  });
+});
+buildCalendarGroupPicker();
 elements.calendarClear.addEventListener("click", () => {
   state.calendar.start = "";
   state.calendar.end = "";
   state.calendar.notice = "";
+  resetCalendarGroups();
   elements.calendarReason.value = "";
   showCalendarError("");
   renderCalendar();
@@ -1977,7 +2089,7 @@ document.querySelectorAll("[data-close-dialog]").forEach((button) => {
 const statsView = createStatsView({
   // Las llegadas tarde en días sin clases no se cuentan en informes ni en el Excel.
   getEvents: () => normalizeLateEvents(state.records, state.students, state.evidence)
-    .filter((event) => !noClassPeriodFor(event.day)),
+    .filter((event) => !noClassPeriodFor(event.day, event.group)),
   onExport: (result, range, filters) => exportToXlsx(
     result,
     range,

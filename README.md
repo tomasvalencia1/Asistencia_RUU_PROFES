@@ -25,13 +25,13 @@ Los botones se ocultan para docentes y las reglas de Realtime Database también 
 
 ### Días sin clases (vacaciones, recesos, festivos)
 
-El botón **Días sin clases** abre un calendario. Directivo y administrador tocan el primer y el último día, escriben el motivo (por ejemplo «Semana de receso escolar») y guardan; los docentes sólo lo consultan. En esos días:
+El botón **Días sin clases** abre un calendario. Directivo y administrador tocan el primer y el último día, eligen **Todos los grupos** o **Solo algunos grupos** (con casillas por grupo y por grado completo), escriben el motivo (por ejemplo «Semana de receso escolar») y guardan; los docentes sólo lo consultan. En el calendario, las rayas naranjas son días sin clases para todos y las azules, días sin clases sólo para algunos grupos. En esos días, para los grupos afectados:
 
 - el panel no cuenta llegadas tarde ni marca faltas, y en «Hoy» muestra el motivo;
 - **Informes y Excel** tampoco cuentan esas llegadas tarde;
-- el lector Android (versión 4.1 o superior) muestra «Hoy no hay clases» con el motivo y no guarda las tarjetas que se acerquen.
+- el lector Android (versión 4.2 o superior) muestra «Hoy no hay clases» con el motivo y no guarda las tarjetas de esos grupos.
 
-Se guarda en `config/diasSinClases/<id>` con `desde`, `hasta` (AAAA-MM-DD), `motivo`, `creadoPorUid` y `creadoEn`. Las reglas permiten leerlo a cualquiera (el lector no inicia sesión) y escribirlo sólo a directivo y administrador. Quitar un periodo hace que esos días vuelvan a contar.
+Se guarda en `config/diasSinClases/<id>` con `desde`, `hasta` (AAAA-MM-DD), `motivo`, `grupos` (`"todos"` o una lista como `"6.1,10.2"`; si falta, cuenta como todos), `creadoPorUid` y `creadoEn` (hora del servidor). Las reglas permiten leerlo a cualquiera (el lector no inicia sesión) y escribirlo sólo a directivo y administrador. Quitar un periodo hace que esos días vuelvan a contar.
 
 ### Excusas de faltas
 

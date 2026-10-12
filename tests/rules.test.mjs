@@ -130,6 +130,10 @@ test("días sin clases: todos los leen (también el lector sin sesión); sólo d
   }
   await assertFails(db("dir").ref("config/diasSinClases/p2").set({ ...periodo("dir"), hasta: "2026-10-01" }));
   await assertFails(db("dir").ref("config/diasSinClases/p2").set({ ...periodo("dir"), extra: 1 }));
+  await assertSucceeds(db("dir").ref("config/diasSinClases/p3").set({ ...periodo("dir"), grupos: "todos" }));
+  await assertSucceeds(db("dir").ref("config/diasSinClases/p4").set({ ...periodo("dir"), grupos: "6.1,10.2,11.3" }));
+  await assertFails(db("dir").ref("config/diasSinClases/p5").set({ ...periodo("dir"), grupos: "12.1" }));
+  await assertFails(db("dir").ref("config/diasSinClases/p6").set({ ...periodo("dir"), grupos: "6.1;6.2" }));
 });
 
 test("faltas: la clave debe ser fecha_uid y la excusa debe quedar a nombre de quien la revisa", async () => {
