@@ -141,6 +141,10 @@ const elements = {
   oldYearsNotice: document.querySelector("#oldYearsNotice"),
   oldYearsText: document.querySelector("#oldYearsText"),
   deleteOldYearsButton: document.querySelector("#deleteOldYearsButton"),
+  deleteOldYearsDialog: document.querySelector("#deleteOldYearsDialog"),
+  deleteOldYearsStep: document.querySelector("#deleteOldYearsStep"),
+  deleteOldYearsWarning: document.querySelector("#deleteOldYearsWarning"),
+  deleteOldYearsConfirm: document.querySelector("#deleteOldYearsConfirm"),
   groupPicker: document.querySelector("#groupPicker"),
   groupPanel: document.querySelector("#groupPanel"),
   activeGroupLabel: document.querySelector("#activeGroupLabel"),
@@ -362,6 +366,7 @@ function showUserFormError(message) {
 }
 
 function showLogin() {
+  closeDialog(elements.deleteOldYearsDialog);
   closeDialog(elements.userAdminDialog);
   closeDialog(elements.statsDialog);
   closeDialog(elements.calendarDialog);
@@ -544,10 +549,64 @@ async function checkOldYears() {
     if (sessionId !== state.sessionId || !canManage()) return;
     showOldYearsText("");
     elements.deleteOldYearsButton.hidden = false;
+    elements.deleteOldYearsButton.disabled = false;
     elements.oldYearsNotice.hidden = !snapshot.exists();
   } catch (error) {
     console.warn("No fue posible revisar las lecturas de años anteriores", error);
   }
+}
+
+// Un paso de la confirmación: muestra la advertencia y el botón sólo se activa tras unos segundos
+// para que se alcance a leer. Devuelve true si se confirmó; false si se canceló o se cerró.
+const DELETE_WAIT_SECONDS = 5;
+
+function confirmDeleteStep(step, warning, actionLabel) {
+  const dialog = elements.deleteOldYearsDialog;
+  const button = elements.deleteOldYearsConfirm;
+  elements.deleteOldYearsStep.textContent = "Paso " + step + " de 2";
+  elements.deleteOldYearsWarning.textContent = warning;
+  return new Promise((resolve) => {
+    let remaining = DELETE_WAIT_SECONDS;
+    let done = false;
+    const showCountdown = () => {
+      button.disabled = remaining > 0;
+      button.textContent = remaining > 0 ? actionLabel + " (" + remaining + ")" : actionLabel;
+    };
+    const timer = setInterval(() => {
+      remaining -= 1;
+      showCountdown();
+      if (remaining <= 0) clearInterval(timer);
+    }, 1000);
+    // Se resuelve desde los botones (y Escape o un cierre externo); no depende sólo del evento "close".
+    const finish = (confirmed) => {
+      if (done) return;
+      done = true;
+      clearInterval(timer);
+      button.removeEventListener("click", onConfirm);
+      dialog.removeEventListener("click", onCancelClick);
+      dialog.removeEventListener("cancel", onEscape);
+      dialog.removeEventListener("close", onClosed);
+      closeDialog(dialog);
+      resolve(confirmed);
+    };
+    const onConfirm = () => {
+      if (remaining <= 0) finish(true);
+    };
+    const onCancelClick = (event) => {
+      if (event.target.closest("[data-close-dialog]")) finish(false);
+    };
+    const onEscape = () => finish(false);
+    // El "close" del paso anterior puede llegar cuando este paso ya abrió el diálogo: se ignora.
+    const onClosed = () => {
+      if (!dialog.open) finish(false);
+    };
+    button.addEventListener("click", onConfirm);
+    dialog.addEventListener("click", onCancelClick);
+    dialog.addEventListener("cancel", onEscape);
+    dialog.addEventListener("close", onClosed);
+    showCountdown();
+    openDialog(dialog);
+  });
 }
 
 async function deleteOldYears() {
@@ -564,14 +623,23 @@ async function deleteOldYears() {
       elements.oldYearsNotice.hidden = true;
       return;
     }
-    const confirmed = window.confirm(
-      "Se borrarán " + plural(ids.length, "lectura", "lecturas") + " de antes de " + year +
-        " (con sus excusas). No se puede deshacer. ¿Continuar?"
+    const total = plural(ids.length, "lectura", "lecturas");
+    showOldYearsText("");
+    const firstOk = await confirmDeleteStep(
+      1,
+      "Vas a borrar " + total + " de antes de " + year + ", con sus excusas. Desaparecerán de Firebase y no " +
+        "se pueden recuperar. Si hay que conservarlas, pide antes al administrador que exporte una copia " +
+        "desde la consola de Firebase.",
+      "Entiendo, continuar"
     );
-    if (!confirmed) {
-      showOldYearsText("");
-      return;
-    }
+    if (!firstOk || sessionId !== state.sessionId) return;
+    const secondOk = await confirmDeleteStep(
+      2,
+      "Última confirmación: se borrarán definitivamente " + total + " de antes de " + year +
+        ". Esta acción no se puede deshacer.",
+      "Borrar definitivamente"
+    );
+    if (!secondOk || sessionId !== state.sessionId || !canManage()) return;
     const BATCH = 500;
     for (let start = 0; start < ids.length; start += BATCH) {
       const changes = {};

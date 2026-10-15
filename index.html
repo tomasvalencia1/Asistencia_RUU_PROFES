@@ -111,6 +111,24 @@
     </section>
   </main>
 
+  <!-- Borrado de lecturas de años anteriores: dos pasos, cada uno con 5 s de espera antes de poder seguir. -->
+  <dialog id="deleteOldYearsDialog" class="app-dialog" aria-labelledby="deleteOldYearsTitle">
+    <form class="stack-form" novalidate>
+      <div class="dialog-heading">
+        <div>
+          <p id="deleteOldYearsStep" class="eyebrow">Paso 1 de 2</p>
+          <h2 id="deleteOldYearsTitle">Borrar lecturas de años anteriores</h2>
+        </div>
+        <button class="icon-button" type="button" data-close-dialog="deleteOldYearsDialog" aria-label="Cerrar">×</button>
+      </div>
+      <p id="deleteOldYearsWarning" class="form-error delete-warning" role="alert"></p>
+      <div class="dialog-actions">
+        <button class="secondary-button" type="button" data-close-dialog="deleteOldYearsDialog">Cancelar</button>
+        <button id="deleteOldYearsConfirm" class="danger-button" type="button" disabled>Continuar</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="studentDialog" class="app-dialog" aria-labelledby="studentDialogTitle">
     <form id="studentForm" class="stack-form" novalidate>
       <div class="dialog-heading">

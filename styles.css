@@ -919,6 +919,7 @@ h2 { margin-bottom: 0; color: var(--navy); }
   justify-content: space-between;
 }
 .old-years-notice p { flex: 1 1 260px; margin: 0; }
+.delete-warning { margin: 0; font-size: .95rem; }
 .no-class-notice {
   margin: 0;
   padding: 14px 16px;
