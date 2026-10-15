@@ -74,6 +74,15 @@ test("lector con cuenta de rol lector: lee la ficha, crea el registro e incremen
   await assertFails(db("lec").ref("registros/r1/justificacion").set(justification("lec")));
 });
 
+test("el registro debe copiar el nombre exacto de la ficha (con sus espacios)", async () => {
+  await env.withSecurityRulesDisabled(async (context) => {
+    await context.database().ref("estudiantes/0A0B0C0D").set({ nombre: "Ana Pérez ", grupo: "7.1", llegadasTarde: 0 });
+  });
+  const base = { ...newRecord, uid: "0A0B0C0D", grupo: "7.1" };
+  await assertFails(db("lec").ref("registros/recortado").set({ ...base, nombre: "Ana Pérez" }));
+  await assertSucceeds(db("lec").ref("registros/exacto").set({ ...base, nombre: "Ana Pérez " }));
+});
+
 test("sin sesión, con lector desactivado o con personal no se pueden fabricar lecturas", async () => {
   for (const uid of [null, "lecoff", "doc", "dir", "adm"]) {
     await assertFails(db(uid).ref("registros/falso").set(newRecord));
