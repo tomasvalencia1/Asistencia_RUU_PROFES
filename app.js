@@ -25,13 +25,18 @@ import {
   signOut
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js";
 import {
+  endBefore,
   get,
   getDatabase,
+  limitToFirst,
   onValue,
+  orderByChild,
+  query,
   ref,
   remove,
   serverTimestamp,
   set,
+  startAt,
   update
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js";
 import {
@@ -133,6 +138,9 @@ const elements = {
   statsDialog: document.querySelector("#statsDialog"),
   syncStatus: document.querySelector("#syncStatus"),
   dataWarning: document.querySelector("#dataWarning"),
+  oldYearsNotice: document.querySelector("#oldYearsNotice"),
+  oldYearsText: document.querySelector("#oldYearsText"),
+  deleteOldYearsButton: document.querySelector("#deleteOldYearsButton"),
   groupPicker: document.querySelector("#groupPicker"),
   groupPanel: document.querySelector("#groupPanel"),
   activeGroupLabel: document.querySelector("#activeGroupLabel"),
@@ -373,6 +381,8 @@ function showApp() {
   elements.userRole.textContent = roleLabel(text(state.profile.rol));
   elements.addStudentButton.hidden = !canManage();
   elements.adminUsersButton.hidden = !isAdmin();
+  elements.oldYearsNotice.hidden = true;
+  if (canManage()) checkOldYears();
 }
 
 function detachDatabaseListeners() {
@@ -451,8 +461,10 @@ function subscribeToData() {
     }
   );
 
+  // Sólo las lecturas del año en curso: las de años anteriores siguen en Firebase hasta que
+  // un directivo o administrador las borre (ver checkOldYears).
   state.recordUnsubscribe = onValue(
-    ref(database, "registros"),
+    query(ref(database, "registros"), orderByChild("fecha"), startAt(currentYearStart())),
     (snapshot) => {
       state.records = snapshot.val() || {};
       render();
@@ -503,6 +515,82 @@ function subscribeToData() {
       state.noClassPeriods = {};
     }
   );
+}
+
+/* ---------- Lecturas de años anteriores ---------- */
+
+function currentYearStart() {
+  return todayKey().slice(0, 4) + "-01-01";
+}
+
+// Lecturas con fecha válida de años anteriores (las reglas sólo permiten borrar éstas).
+function oldYearsQuery(onlyFirst) {
+  const constraints = [orderByChild("fecha"), startAt("2000-01-01"), endBefore(currentYearStart())];
+  if (onlyFirst) constraints.push(limitToFirst(1));
+  return query(ref(database, "registros"), ...constraints);
+}
+
+function showOldYearsText(message) {
+  elements.oldYearsText.textContent = message ||
+    "Hay lecturas de años anteriores a " + currentYearStart().slice(0, 4) +
+    " guardadas en Firebase. El panel ya no las muestra; puedes borrarlas cuando quieras.";
+}
+
+// Sólo para directivo y admin: avisa si quedan lecturas de años anteriores (descarga una sola).
+async function checkOldYears() {
+  const sessionId = state.sessionId;
+  try {
+    const snapshot = await get(oldYearsQuery(true));
+    if (sessionId !== state.sessionId || !canManage()) return;
+    showOldYearsText("");
+    elements.deleteOldYearsButton.hidden = false;
+    elements.oldYearsNotice.hidden = !snapshot.exists();
+  } catch (error) {
+    console.warn("No fue posible revisar las lecturas de años anteriores", error);
+  }
+}
+
+async function deleteOldYears() {
+  if (!canManage()) return;
+  const sessionId = state.sessionId;
+  const year = currentYearStart().slice(0, 4);
+  elements.deleteOldYearsButton.disabled = true;
+  try {
+    showOldYearsText("Contando las lecturas de años anteriores…");
+    const snapshot = await get(oldYearsQuery(false));
+    if (sessionId !== state.sessionId) return;
+    const ids = Object.keys(snapshot.val() || {});
+    if (!ids.length) {
+      elements.oldYearsNotice.hidden = true;
+      return;
+    }
+    const confirmed = window.confirm(
+      "Se borrarán " + plural(ids.length, "lectura", "lecturas") + " de antes de " + year +
+        " (con sus excusas). No se puede deshacer. ¿Continuar?"
+    );
+    if (!confirmed) {
+      showOldYearsText("");
+      return;
+    }
+    const BATCH = 500;
+    for (let start = 0; start < ids.length; start += BATCH) {
+      const changes = {};
+      ids.slice(start, start + BATCH).forEach((id) => {
+        changes["registros/" + id] = null;
+      });
+      await update(ref(database), changes);
+      if (sessionId !== state.sessionId) return;
+      showOldYearsText("Borrando… " + Math.min(start + BATCH, ids.length) + " de " + ids.length);
+    }
+    showOldYearsText("Listo: se borraron " + plural(ids.length, "lectura", "lecturas") + " de años anteriores.");
+    elements.deleteOldYearsButton.hidden = true;
+  } catch (error) {
+    if (sessionId !== state.sessionId) return;
+    console.error("No fue posible borrar las lecturas de años anteriores", error);
+    showOldYearsText("No se pudieron borrar todas las lecturas de años anteriores. Revisa Internet y vuelve a intentarlo.");
+  } finally {
+    elements.deleteOldYearsButton.disabled = false;
+  }
 }
 
 /* ---------- Días sin clases ---------- */
@@ -2012,6 +2100,7 @@ elements.searchInput.addEventListener("input", (event) => {
   render();
 });
 elements.addStudentButton.addEventListener("click", openStudentDialog);
+elements.deleteOldYearsButton.addEventListener("click", deleteOldYears);
 elements.statsButton.addEventListener("click", () => {
   if (isActiveStaff(state.profile)) statsView.open();
 });

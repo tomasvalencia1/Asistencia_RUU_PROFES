@@ -90,6 +90,25 @@ test("registros y excusas no aceptan campos extra", async () => {
   await assertSucceeds(db("dir").ref("registros/r1/justificacion").set(justification("dir")));
 });
 
+test("directivo y admin borran lecturas de años anteriores, nunca las del año en curso", async () => {
+  const year = new Date(Date.now() - 5 * 3600 * 1000).getUTCFullYear(); // año en Bogotá
+  await env.withSecurityRulesDisabled(async (context) => {
+    await context.database().ref("registros").update({
+      viejo1: { ...newRecord, fecha: (year - 1) + "-11-20" },
+      viejo2: { ...newRecord, fecha: (year - 1) + "-11-21" },
+      actual: { ...newRecord, fecha: year + "-01-02" }
+    });
+  });
+  await assertSucceeds(db("doc").ref("registros").orderByChild("fecha").startAt(year + "-01-01").once("value"));
+  for (const uid of [null, "doc", "lec", "off"]) {
+    await assertFails(db(uid).ref("registros/viejo1").remove());
+  }
+  await assertSucceeds(db("dir").ref("registros/viejo1").remove());
+  await assertSucceeds(db("adm").ref().update({ "registros/viejo2": null }));
+  await assertFails(db("dir").ref("registros/actual").remove());
+  await assertFails(db("adm").ref().update({ "registros/actual": null }));
+});
+
 test("docente, directivo y admin activos también pueden usar el lector", async () => {
   for (const uid of ["doc", "dir", "adm"]) {
     await assertSucceeds(db(uid).ref("estudiantes/5AD56CAD1D4187").once("value"));

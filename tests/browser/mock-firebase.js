@@ -42,14 +42,34 @@ function writePath(path, value) {
   else node[last] = JSON.parse(JSON.stringify(value));
 }
 
-function snapshot(path) {
-  const value = readPath(path);
+// Consultas simplificadas (orderByChild + startAt/endBefore + limitToFirst sobre textos),
+// suficientes para filtrar /registros por fecha como lo hace el panel.
+function applyQuery(value, constraints) {
+  if (!constraints || !constraints.length || !value || typeof value !== "object") return value;
+  const order = constraints.find((item) => item.type === "orderByChild");
+  const keyOf = ([key, child]) => {
+    const raw = order ? (child && typeof child === "object" ? child[order.child] : undefined) : key;
+    return raw === undefined || raw === null ? null : String(raw);
+  };
+  let entries = Object.entries(value);
+  constraints.forEach((item) => {
+    if (item.type === "startAt") entries = entries.filter((entry) => keyOf(entry) !== null && keyOf(entry) >= item.value);
+    if (item.type === "endBefore") entries = entries.filter((entry) => keyOf(entry) === null || keyOf(entry) < item.value);
+  });
+  entries.sort((first, second) => String(keyOf(first) || "").localeCompare(String(keyOf(second) || "")));
+  const limit = constraints.find((item) => item.type === "limitToFirst");
+  if (limit) entries = entries.slice(0, limit.value);
+  return entries.length ? Object.fromEntries(entries) : null;
+}
+
+function snapshot(path, constraints) {
+  const value = applyQuery(readPath(path), constraints);
   return { val: () => value, exists: () => value !== null };
 }
 
 function notify() {
   listeners.forEach((listener) => {
-    setTimeout(() => listener.callback(snapshot(listener.path)), mock.latencyMs || 0);
+    setTimeout(() => listener.callback(snapshot(listener.path, listener.constraints)), mock.latencyMs || 0);
   });
 }
 
@@ -93,12 +113,17 @@ export function ref(database, path) { return { path: path || "" }; }
 // En Firebase real el servidor reemplaza este marcador por su hora; aquí se usa la del navegador.
 export function serverTimestamp() { return Date.now(); }
 export function onValue(reference, callback) {
-  const listener = { path: reference.path, callback };
+  const listener = { path: reference.path, constraints: reference.constraints, callback };
   listeners.add(listener);
-  setTimeout(() => callback(snapshot(reference.path)), mock.latencyMs || 0);
+  setTimeout(() => callback(snapshot(reference.path, reference.constraints)), mock.latencyMs || 0);
   return () => listeners.delete(listener);
 }
-export async function get(reference) { return snapshot(reference.path); }
+export async function get(reference) { return snapshot(reference.path, reference.constraints); }
+export function query(reference, ...constraints) { return { path: reference.path, constraints }; }
+export function orderByChild(child) { return { type: "orderByChild", child }; }
+export function startAt(value) { return { type: "startAt", value }; }
+export function endBefore(value) { return { type: "endBefore", value }; }
+export function limitToFirst(value) { return { type: "limitToFirst", value }; }
 export async function set(reference, value) {
   mock.calls.push({ op: "set", path: reference.path, value });
   if (!canWrite()) throw denied();
