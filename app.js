@@ -230,6 +230,7 @@ const state = {
   activeGroup: savedGroup(),
   search: "",
   sessionId: 0,
+  profileUnsubscribe: null,
   studentUnsubscribe: null,
   recordUnsubscribe: null,
   faltasUnsubscribe: null,
@@ -375,6 +376,8 @@ function showApp() {
 }
 
 function detachDatabaseListeners() {
+  if (state.profileUnsubscribe) state.profileUnsubscribe();
+  state.profileUnsubscribe = null;
   if (state.studentUnsubscribe) state.studentUnsubscribe();
   if (state.recordUnsubscribe) state.recordUnsubscribe();
   if (state.evidenceUnsubscribe) state.evidenceUnsubscribe();
@@ -410,6 +413,29 @@ function liveStatus() {
     minute: "2-digit",
     second: "2-digit"
   }), false);
+}
+
+// El perfil se sigue en vivo: si administración desactiva la cuenta o le quita el rol con el
+// panel abierto, se cierra la sesión (y se borran los datos cargados); si le cambia el rol, se aplica.
+function watchProfile(uid) {
+  state.profileUnsubscribe = onValue(
+    ref(database, "usuarios/" + uid),
+    (snapshot) => {
+      const profile = snapshot.val();
+      if (!isActiveStaff(profile)) {
+        showLoginError("Tu cuenta fue desactivada o ya no tiene rol en el panel. Pide a administración que la habilite.");
+        signOut(auth).catch((error) => console.warn("No se pudo cerrar la sesión", error));
+        return;
+      }
+      if (text(profile.rol) === text(state.profile.rol) && text(profile.nombre) === text(state.profile.nombre)) return;
+      state.profile = profile;
+      showApp();
+      render();
+    },
+    (error) => {
+      console.warn("No fue posible seguir el perfil del usuario", error);
+    }
+  );
 }
 
 function subscribeToData() {
@@ -2173,6 +2199,7 @@ onAuthStateChanged(auth, async (user) => {
     render();
     setStatus("Conectando actualizaciones en vivo…", false);
     subscribeToData();
+    watchProfile(user.uid);
     resetInactivityTimer();
   } catch (error) {
     if (sessionId !== state.sessionId) return;
