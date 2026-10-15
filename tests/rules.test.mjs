@@ -83,6 +83,13 @@ test("el registro debe copiar el nombre exacto de la ficha (con sus espacios)", 
   await assertSucceeds(db("lec").ref("registros/exacto").set({ ...base, nombre: "Ana Pérez " }));
 });
 
+test("registros y excusas no aceptan campos extra", async () => {
+  await assertFails(db("lec").ref("registros/extra").set({ ...newRecord, extra: "x" }));
+  await assertFails(db("dir").ref("registros/r1/extra").set("x"));
+  await assertFails(db("dir").ref("registros/r1/justificacion").set({ ...justification("dir"), extra: true }));
+  await assertSucceeds(db("dir").ref("registros/r1/justificacion").set(justification("dir")));
+});
+
 test("docente, directivo y admin activos también pueden usar el lector", async () => {
   for (const uid of ["doc", "dir", "adm"]) {
     await assertSucceeds(db(uid).ref("estudiantes/5AD56CAD1D4187").once("value"));
