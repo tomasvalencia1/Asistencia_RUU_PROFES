@@ -1047,6 +1047,8 @@ function buildModel() {
       const absentToday = readingStarted && !index.presentToday.has(key) && !noClassPeriodFor(index.today, group);
       return {
         uid: studentUid,
+        // Clave tal como está en Firebase (puede tener minúsculas o ":" si se creó en la consola).
+        firebaseKey: uid,
         name: text(rawStudent.nombre) || "Sin nombre",
         rawGroup: text(rawStudent.grupo),
         group,
@@ -1570,7 +1572,7 @@ async function removeStudent(student) {
   if (!confirmed) return;
 
   try {
-    await remove(ref(database, "estudiantes/" + student.uid));
+    await remove(ref(database, "estudiantes/" + student.firebaseKey));
     setStatus("Estudiante retirado. Sus registros históricos se conservaron.", false);
   } catch (error) {
     console.error("No fue posible quitar estudiante", error);
