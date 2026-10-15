@@ -83,8 +83,16 @@ test("el registro debe copiar el nombre exacto de la ficha (con sus espacios)", 
   await assertSucceeds(db("lec").ref("registros/exacto").set({ ...base, nombre: "Ana Pérez " }));
 });
 
-test("sin sesión, con lector desactivado o con personal no se pueden fabricar lecturas", async () => {
-  for (const uid of [null, "lecoff", "doc", "dir", "adm"]) {
+test("docente, directivo y admin activos también pueden usar el lector", async () => {
+  for (const uid of ["doc", "dir", "adm"]) {
+    await assertSucceeds(db(uid).ref("estudiantes/5AD56CAD1D4187").once("value"));
+    await assertSucceeds(db(uid).ref("registros/lector-" + uid).set(newRecord));
+  }
+  await assertSucceeds(db("dir").ref("estudiantes/5AD56CAD1D4187/llegadasTarde").set(2));
+});
+
+test("sin sesión o con cuentas desactivadas no se pueden fabricar lecturas", async () => {
+  for (const uid of [null, "lecoff", "off"]) {
     await assertFails(db(uid).ref("registros/falso").set(newRecord));
     await assertFails(db(uid).ref("estudiantes/5AD56CAD1D4187/llegadasTarde").set(2));
   }
