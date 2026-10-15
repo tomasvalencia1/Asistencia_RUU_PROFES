@@ -16,7 +16,8 @@ setGlobalOptions({ region: "us-central1", maxInstances: 10 });
 
 const auth = admin.auth();
 const database = admin.database();
-const ALLOWED_ROLES = new Set(["docente", "directivo", "admin"]);
+// «lector» es la cuenta de los teléfonos de la portería: sólo registra tarjetas y no entra al panel.
+const ALLOWED_ROLES = new Set(["docente", "directivo", "admin", "lector"]);
 
 function cleanText(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -41,7 +42,7 @@ function validEmail(value) {
 function validRole(value) {
   const role = cleanText(value);
   if (!ALLOWED_ROLES.has(role)) {
-    throw new HttpsError("invalid-argument", "El rol debe ser docente, directivo o admin.");
+    throw new HttpsError("invalid-argument", "El rol debe ser docente, directivo, admin o lector.");
   }
   return role;
 }

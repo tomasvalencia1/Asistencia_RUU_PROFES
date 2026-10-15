@@ -96,7 +96,8 @@ const MANAGER_ROLES = new Set(["directivo", "admin"]);
 const ROLE_LABELS = {
   docente: "Docente",
   directivo: "Directivo",
-  admin: "Administrador"
+  admin: "Administrador",
+  lector: "Lector (portería)"
 };
 const EXCUSE_LABELS = {
   pendiente: "Pendiente",

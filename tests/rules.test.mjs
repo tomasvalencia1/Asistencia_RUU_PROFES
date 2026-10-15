@@ -37,7 +37,9 @@ beforeEach(async () => {
         doc: { nombre: "Docente", rol: "docente", activo: true },
         dir: { nombre: "Directiva", rol: "directivo", activo: true },
         adm: { nombre: "Admin", rol: "admin", activo: true },
-        off: { nombre: "Inactivo", rol: "directivo", activo: false }
+        off: { nombre: "Inactivo", rol: "directivo", activo: false },
+        lec: { nombre: "Lector portería", rol: "lector", activo: true },
+        lecoff: { nombre: "Lector perdido", rol: "lector", activo: false }
       },
       estudiantes: {
         "5AD56CAD1D4187": { nombre: "Ñusta Ibáñez", grupo: "6.1", llegadasTarde: 1 }
@@ -61,12 +63,24 @@ const newRecord = {
 };
 const justification = (uid) => ({ estado: "validada", motivo: "Cita médica", revisadaPorUid: uid, revisadaEn: 1 });
 
-test("lector Android sin sesión: lee la ficha, crea el registro e incrementa en uno", async () => {
-  await assertSucceeds(db(null).ref("estudiantes/5AD56CAD1D4187").once("value"));
-  await assertSucceeds(db(null).ref("config/franjas").once("value"));
-  await assertSucceeds(db(null).ref("registros/nuevo").set(newRecord));
-  await assertSucceeds(db(null).ref("estudiantes/5AD56CAD1D4187/llegadasTarde").set(2));
-  await assertFails(db(null).ref("estudiantes/5AD56CAD1D4187/llegadasTarde").set(10));
+test("lector con cuenta de rol lector: lee la ficha, crea el registro e incrementa en uno", async () => {
+  await assertSucceeds(db("lec").ref("estudiantes/5AD56CAD1D4187").once("value"));
+  await assertSucceeds(db("lec").ref("config/franjas").once("value"));
+  await assertSucceeds(db("lec").ref("registros/nuevo").set(newRecord));
+  await assertSucceeds(db("lec").ref("estudiantes/5AD56CAD1D4187/llegadasTarde").set(2));
+  await assertFails(db("lec").ref("estudiantes/5AD56CAD1D4187/llegadasTarde").set(10));
+  await assertFails(db("lec").ref("registros").once("value"));
+  await assertFails(db("lec").ref("estudiantes").once("value"));
+  await assertFails(db("lec").ref("registros/r1/justificacion").set(justification("lec")));
+});
+
+test("sin sesión, con lector desactivado o con personal no se pueden fabricar lecturas", async () => {
+  for (const uid of [null, "lecoff", "doc", "dir", "adm"]) {
+    await assertFails(db(uid).ref("registros/falso").set(newRecord));
+    await assertFails(db(uid).ref("estudiantes/5AD56CAD1D4187/llegadasTarde").set(2));
+  }
+  await assertFails(db(null).ref("estudiantes/5AD56CAD1D4187").once("value"));
+  await assertFails(db("lecoff").ref("estudiantes/5AD56CAD1D4187").once("value"));
 });
 
 test("sin sesión no se leen registros, usuarios ni evidencias", async () => {
