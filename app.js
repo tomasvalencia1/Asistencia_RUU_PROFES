@@ -603,9 +603,14 @@ function parseNoClassGroups(value) {
   return groups.length ? groups.sort(groupCollator.compare) : null;
 }
 
+// Se calcula una vez por cada dato nuevo de Firebase (state.noClassPeriods se reemplaza, nunca se
+// modifica): el panel la consulta por cada llegada tarde.
+let noClassCache = { source: null, list: [] };
+
 // Periodos válidos ordenados por fecha: { id, desde, hasta, motivo, groups } (groups null = todos).
 function noClassList() {
-  return Object.entries(state.noClassPeriods || {})
+  if (noClassCache.source === state.noClassPeriods) return noClassCache.list;
+  const list = Object.entries(state.noClassPeriods || {})
     .map(([id, period]) => ({
       id,
       desde: text(period && period.desde),
@@ -615,6 +620,8 @@ function noClassList() {
     }))
     .filter((period) => isDayKey(period.desde) && isDayKey(period.hasta) && period.hasta >= period.desde)
     .sort((first, second) => first.desde.localeCompare(second.desde));
+  noClassCache = { source: state.noClassPeriods, list };
+  return list;
 }
 
 function noClassPeriodsOn(day) {
