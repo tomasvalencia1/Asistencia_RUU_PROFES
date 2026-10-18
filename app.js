@@ -198,6 +198,10 @@ const elements = {
   saveExcuseButton: document.querySelector("#saveExcuseButton"),
   deleteExcuseButton: document.querySelector("#deleteExcuseButton"),
   evidenceSection: document.querySelector("#evidenceSection"),
+  faltaRangeSection: document.querySelector("#faltaRangeSection"),
+  faltaFromInput: document.querySelector("#faltaFromInput"),
+  faltaToInput: document.querySelector("#faltaToInput"),
+  faltaRangeSummary: document.querySelector("#faltaRangeSummary"),
   evidenceDropZone: document.querySelector("#evidenceDropZone"),
   evidencePreview: document.querySelector("#evidencePreview"),
   evidenceDropText: document.querySelector("#evidenceDropText"),
@@ -1513,9 +1517,52 @@ function prepareExcuseDialog(kind, info, justification) {
   setExcuseStatus(justification ? text(justification.estado) : "pendiente");
   elements.excuseReasonInput.value = justification ? text(justification.motivo) : "";
   elements.deleteExcuseButton.hidden = !justification;
-  // Las fotos de evidencia sólo existen para llegadas tarde.
+  // Las fotos de evidencia sólo existen para llegadas tarde; el rango de días, sólo para faltas.
   elements.evidenceSection.hidden = isFalta;
+  elements.faltaRangeSection.hidden = !isFalta;
   showExcuseFormError("");
+}
+
+// Una excusa de falta puede cubrir varios días (por ejemplo, una incapacidad). Se guarda en cada
+// día de clase del rango (sin sábados, domingos ni días sin clases del grupo) y siempre en el día
+// de la falta que se está excusando. Las llegadas tarde siguen siendo de un solo registro.
+const MAX_FALTA_RANGE_DAYS = 31;
+
+function faltaRangeDays(falta, from, to) {
+  if (!isDayKey(from) || !isDayKey(to)) return { error: "Elige las fechas Desde y Hasta.", days: [] };
+  if (to < from) return { error: "La fecha Hasta no puede ser anterior a Desde.", days: [] };
+  if (dayNumber(to) - dayNumber(from) + 1 > MAX_FALTA_RANGE_DAYS) {
+    return { error: "El rango puede cubrir como máximo " + MAX_FALTA_RANGE_DAYS + " días.", days: [] };
+  }
+  if (falta.fecha < from || falta.fecha > to) {
+    return { error: "El rango debe incluir el día de la falta (" + shortDayLabel(falta.fecha) + ").", days: [] };
+  }
+  const days = [];
+  for (let day = from; day <= to; day = addDays(day, 1)) {
+    const schoolDay = weekdayFromMonday(day) < 5 && !noClassPeriodFor(day, falta.group);
+    if (schoolDay || day === falta.fecha) days.push(day);
+  }
+  return { error: "", days };
+}
+
+function renderFaltaRangeSummary() {
+  const falta = state.editingFalta;
+  if (!falta) return;
+  const { error, days } = faltaRangeDays(falta, elements.faltaFromInput.value, elements.faltaToInput.value);
+  if (error) {
+    elements.faltaRangeSummary.textContent = error;
+    return;
+  }
+  if (days.length === 1) {
+    elements.faltaRangeSummary.textContent = "Sólo la falta del " + shortDayLabel(days[0]) + ".";
+    return;
+  }
+  const shown = days.slice(0, 6).map(shortDayLabel).join(", ");
+  const others = days.filter((day) => day !== falta.fecha && state.faltas[faltaKey(day, falta.uid)]).length;
+  elements.faltaRangeSummary.textContent =
+    "Cubre " + days.length + " días de clase: " + shown + (days.length > 6 ? " y " + (days.length - 6) + " más" : "") + "." +
+    (others === 1 ? " 1 día ya tenía excusa y se reemplazará." : "") +
+    (others > 1 ? " " + others + " días ya tenían excusa y se reemplazarán." : "");
 }
 
 function openFaltaExcuseDialog(falta) {
@@ -1531,6 +1578,9 @@ function openFaltaExcuseDialog(falta) {
     falta.name + " · Grupo " + falta.group + " · Falta del " + formatDayLong(falta.fecha),
     existing || null
   );
+  elements.faltaFromInput.value = falta.fecha;
+  elements.faltaToInput.value = falta.fecha;
+  renderFaltaRangeSummary();
   openDialog(elements.excuseDialog);
   elements.excuseReasonInput.focus();
 }
@@ -1539,23 +1589,36 @@ async function saveFaltaExcuse(status, reason) {
   const falta = state.editingFalta;
   if (!canManage() || !falta) return false;
 
+  const { error, days } = faltaRangeDays(falta, elements.faltaFromInput.value, elements.faltaToInput.value);
+  if (error) {
+    showExcuseFormError(error);
+    return false;
+  }
+
   elements.saveExcuseButton.disabled = true;
   showExcuseFormError("");
   try {
-    await set(ref(database, "faltas/" + faltaKey(falta.fecha, falta.uid)), {
-      uid: falta.uid,
-      nombre: falta.name,
-      grupo: normalizeGroup(falta.group),
-      fecha: falta.fecha,
-      justificacion: {
-        estado: status,
-        motivo: reason,
-        revisadaPorUid: state.authUser.uid,
-        revisadaEn: serverTimestamp()
-      }
+    // Una sola escritura: o quedan guardados todos los días, o ninguno.
+    const changes = {};
+    days.forEach((day) => {
+      changes["faltas/" + faltaKey(day, falta.uid)] = {
+        uid: falta.uid,
+        nombre: falta.name,
+        grupo: normalizeGroup(falta.group),
+        fecha: day,
+        justificacion: {
+          estado: status,
+          motivo: reason,
+          revisadaPorUid: state.authUser.uid,
+          revisadaEn: serverTimestamp()
+        }
+      };
     });
+    await update(ref(database), changes);
     closeDialog(elements.excuseDialog);
-    setStatus("Excusa de la falta guardada.", false);
+    setStatus(days.length === 1
+      ? "Excusa de la falta guardada."
+      : "Excusa de la falta guardada para " + days.length + " días de clase.", false);
     return true;
   } catch (error) {
     console.error("No fue posible guardar la excusa de falta", error);
@@ -1569,7 +1632,7 @@ async function saveFaltaExcuse(status, reason) {
 async function deleteFaltaExcuse() {
   const falta = state.editingFalta;
   if (!canManage() || !falta) return;
-  if (!window.confirm("¿Quitar la excusa de esta falta?")) return;
+  if (!window.confirm("¿Quitar la excusa de la falta del " + shortDayLabel(falta.fecha) + "? Los demás días conservan la suya.")) return;
 
   elements.deleteExcuseButton.disabled = true;
   try {
@@ -2220,6 +2283,8 @@ elements.groupReportButton.addEventListener("click", () => {
 elements.studentForm.addEventListener("submit", saveStudent);
 elements.excuseForm.addEventListener("submit", saveExcuse);
 elements.deleteExcuseButton.addEventListener("click", deleteExcuse);
+elements.faltaFromInput.addEventListener("input", renderFaltaRangeSummary);
+elements.faltaToInput.addEventListener("input", renderFaltaRangeSummary);
 elements.evidenceFileButton.addEventListener("click", () => elements.evidenceFileInput.click());
 elements.evidenceCameraButton.addEventListener("click", () => elements.evidenceCameraInput.click());
 [elements.evidenceFileInput, elements.evidenceCameraInput].forEach((input) => {

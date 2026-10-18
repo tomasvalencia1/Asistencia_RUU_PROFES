@@ -193,6 +193,20 @@ test("días sin clases: todos los leen (también el lector sin sesión); sólo d
   await assertFails(db("dir").ref("config/diasSinClases/p6").set({ ...periodo("dir"), grupos: "6.1;6.2" }));
 });
 
+test("faltas: una excusa puede guardarse en varios días con una sola escritura", async () => {
+  const day = (fecha, uid) => ({ ...falta(uid), fecha });
+  const days = (uid) => ({
+    "faltas/2026-10-05_5AD56CAD1D4187": day("2026-10-05", uid),
+    "faltas/2026-10-06_5AD56CAD1D4187": day("2026-10-06", uid),
+    "faltas/2026-10-07_5AD56CAD1D4187": day("2026-10-07", uid)
+  });
+  await assertSucceeds(db("dir").ref().update(days("dir")));
+  await assertFails(db("doc").ref().update(days("doc")));
+  // Si un día no cuadra con su clave, no se guarda ninguno.
+  await assertFails(db("adm").ref().update({ ...days("adm"), "faltas/2026-10-08_5AD56CAD1D4187": day("2026-10-09", "adm") }));
+  await assertSucceeds(db("adm").ref().update(days("adm")));
+});
+
 test("faltas: la clave debe ser fecha_uid y la excusa debe quedar a nombre de quien la revisa", async () => {
   await assertFails(db("dir").ref("faltas/otra-clave").set(falta("dir")));
   await assertFails(db("dir").ref("faltas/2026-10-05_5AD56CAD1D4187").set(falta("adm")));

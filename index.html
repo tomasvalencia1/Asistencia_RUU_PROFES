@@ -181,6 +181,21 @@
         <span id="excuseReasonLabel">Motivo</span>
         <textarea id="excuseReasonInput" name="motivo" rows="4" maxlength="500" required placeholder="Ejemplo: cita médica, transporte escolar, explicación entregada por el acudiente"></textarea>
       </label>
+      <!-- Sólo en faltas: una misma excusa (por ejemplo, una incapacidad) puede cubrir varios días. -->
+      <fieldset id="faltaRangeSection" class="choice-fieldset" hidden>
+        <legend>Días de falta que cubre esta excusa</legend>
+        <div class="date-pair">
+          <label>
+            <span>Desde</span>
+            <input id="faltaFromInput" type="date">
+          </label>
+          <label>
+            <span>Hasta</span>
+            <input id="faltaToInput" type="date">
+          </label>
+        </div>
+        <p id="faltaRangeSummary" class="calendar-summary" aria-live="polite"></p>
+      </fieldset>
       <section id="evidenceSection" class="evidence-editor" aria-labelledby="evidenceEditorTitle">
         <div class="evidence-editor-heading">
           <span id="evidenceEditorTitle">Foto de la excusa (opcional)</span>
