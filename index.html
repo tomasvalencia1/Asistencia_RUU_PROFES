@@ -159,6 +159,41 @@
     </form>
   </dialog>
 
+  <!-- Llegada tarde registrada a mano: el estudiante no pasó la tarjeta por el lector. -->
+  <dialog id="manualLateDialog" class="app-dialog" aria-labelledby="manualLateTitle">
+    <form id="manualLateForm" class="stack-form" novalidate>
+      <div class="dialog-heading">
+        <div>
+          <p class="eyebrow">Sin pasar la tarjeta</p>
+          <h2 id="manualLateTitle">Registrar llegada tarde</h2>
+        </div>
+        <button class="icon-button" type="button" data-close-dialog="manualLateDialog" aria-label="Cerrar">×</button>
+      </div>
+      <p id="manualLateInfo" class="record-info"></p>
+      <fieldset class="choice-fieldset">
+        <legend>¿Por qué no pasó la tarjeta?</legend>
+        <div class="choice-row choice-row-two">
+          <label class="choice"><input type="radio" name="manualReason" value="sin-tarjeta" checked><span>No trajo la tarjeta</span></label>
+          <label class="choice"><input type="radio" name="manualReason" value="no-la-paso"><span>No quiso pasarla</span></label>
+          <label class="choice"><input type="radio" name="manualReason" value="no-leyo"><span>La tarjeta no leyó</span></label>
+          <label class="choice"><input type="radio" name="manualReason" value="otro"><span>Otro motivo</span></label>
+        </div>
+      </fieldset>
+      <label>
+        <span>Hora de llegada</span>
+        <input id="manualLateTime" type="time" step="60" required>
+        <small class="field-hint">Ya tiene la hora actual. Cámbiala sólo si lo registras un rato después de que llegó.</small>
+      </label>
+      <p id="manualLateSummary" class="calendar-summary" aria-live="polite"></p>
+      <p class="help-text">Cuenta igual que una lectura del lector y queda marcada como registro manual a tu nombre. No se puede deshacer desde el panel.</p>
+      <p id="manualLateError" class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button class="secondary-button" type="button" data-close-dialog="manualLateDialog">Cancelar</button>
+        <button id="saveManualLateButton" class="primary-button" type="submit">Registrar llegada tarde</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="excuseDialog" class="app-dialog" aria-labelledby="excuseDialogTitle">
     <form id="excuseForm" class="stack-form" novalidate>
       <div class="dialog-heading">

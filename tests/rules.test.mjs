@@ -212,3 +212,79 @@ test("faltas: la clave debe ser fecha_uid y la excusa debe quedar a nombre de qu
   await assertFails(db("dir").ref("faltas/2026-10-05_5AD56CAD1D4187").set(falta("adm")));
   await assertFails(db("dir").ref("faltas/2026-10-05_5AD56CAD1D4187").set({ ...falta("dir"), extra: true }));
 });
+
+/* ---------- Llegadas tarde registradas a mano desde el panel ---------- */
+
+const NOMBRES = { doc: "Docente", dir: "Directiva", adm: "Admin", lec: "Lector portería" };
+
+// El mismo registro del lector más el bloque `manual`; la clave es manual_<fecha>_<franja>_<uid>.
+function manualRecord(uid, periodo, overrides = {}) {
+  const timestamp = Date.now() - 10 * 60 * 1000;
+  const bogota = new Date(timestamp - 5 * 3600 * 1000).toISOString();
+  const record = {
+    uid: "5AD56CAD1D4187", nombre: "Ñusta Ibáñez", grupo: "6.1", fecha: bogota.slice(0, 10),
+    hora: bogota.slice(11, 19), timestamp, periodo, tarde: true,
+    manual: { porUid: uid, porNombre: NOMBRES[uid], motivo: "sin-tarjeta", registradoEn: { ".sv": "timestamp" } },
+    ...overrides
+  };
+  return { key: "manual_" + record.fecha + "_" + record.periodo + "_" + record.uid, record };
+}
+
+const manualWrite = ({ key, record }) => ({
+  ["registros/" + key]: record,
+  "estudiantes/5AD56CAD1D4187/llegadasTarde": { ".sv": { increment: 1 } }
+});
+
+test("registro manual: docente, directivo y admin lo guardan a su nombre y suma una llegada tarde", async () => {
+  const periodos = { doc: "entrada", dir: "descanso1", adm: "descanso2" };
+  for (const uid of ["doc", "dir", "adm"]) {
+    await assertSucceeds(db(uid).ref().update(manualWrite(manualRecord(uid, periodos[uid]))));
+  }
+  await env.withSecurityRulesDisabled(async (context) => {
+    const total = (await context.database().ref("estudiantes/5AD56CAD1D4187/llegadasTarde").once("value")).val();
+    if (total !== 4) throw new Error("llegadasTarde debía quedar en 4 y quedó en " + total);
+  });
+});
+
+test("registro manual: sólo uno por estudiante, día y franja", async () => {
+  const first = manualRecord("doc", "entrada");
+  await assertSucceeds(db("doc").ref().update(manualWrite(first)));
+  await assertFails(db("doc").ref().update(manualWrite(manualRecord("doc", "entrada"))));
+  await assertFails(db("dir").ref().update(manualWrite(manualRecord("dir", "entrada"))));
+});
+
+test("registro manual: debe quedar a nombre de quien lo registra, con clave, motivo y hora válidos", async () => {
+  const { key, record } = manualRecord("doc", "entrada");
+  const withManual = (changes) => ({ key, record: { ...record, manual: { ...record.manual, ...changes } } });
+  await assertFails(db("doc").ref().update(manualWrite(withManual({ porUid: "dir" }))));
+  await assertFails(db("doc").ref().update(manualWrite(withManual({ porNombre: "Otra persona" }))));
+  await assertFails(db("doc").ref().update(manualWrite(withManual({ motivo: "porque sí" }))));
+  await assertFails(db("doc").ref().update(manualWrite(withManual({ extra: true }))));
+  await assertFails(db("doc").ref().update(manualWrite({ key: "otra-clave", record })));
+  await assertFails(db("doc").ref().update(manualWrite({ key, record: { ...record, tarde: false } })));
+  await assertFails(db("doc").ref().update(manualWrite({ key, record: { ...record, timestamp: Date.now() + 3600 * 1000 } })));
+  await assertFails(db("doc").ref().update(manualWrite({ key, record: { ...record, timestamp: Date.now() - 2 * 86400 * 1000 } })));
+  await assertFails(db("doc").ref().update(manualWrite({ key, record: { ...record, nombre: "Ñusta" } })));
+  await assertSucceeds(db("doc").ref().update(manualWrite({ key, record })));
+});
+
+test("registro manual: sin sesión o con cuenta desactivada no se puede", async () => {
+  for (const uid of [null, "off", "lecoff"]) {
+    const write = manualRecord("doc", "entrada");
+    write.record.manual = { ...write.record.manual, porUid: uid || "anonimo", porNombre: uid === "off" ? "Inactivo" : "Lector perdido" };
+    await assertFails(db(uid).ref().update(manualWrite(write)));
+  }
+});
+
+test("registro manual: el bloque manual no se añade, cambia ni quita después; la excusa sí", async () => {
+  const { key, record } = manualRecord("doc", "entrada");
+  await env.withSecurityRulesDisabled(async (context) => {
+    await context.database().ref("registros/" + key).set({ ...record, manual: { ...record.manual, registradoEn: 1 } });
+  });
+  const manual = { porUid: "dir", porNombre: "Directiva", motivo: "otro", registradoEn: 1 };
+  await assertFails(db("dir").ref("registros/r1/manual").set(manual));
+  await assertFails(db("dir").ref("registros/" + key + "/manual/motivo").set("otro"));
+  await assertFails(db("dir").ref("registros/" + key + "/manual").remove());
+  await assertFails(db("doc").ref("registros/" + key + "/justificacion").set(justification("doc")));
+  await assertSucceeds(db("dir").ref("registros/" + key + "/justificacion").set(justification("dir")));
+});

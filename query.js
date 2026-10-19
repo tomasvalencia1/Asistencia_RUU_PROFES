@@ -29,6 +29,15 @@ export const FRANJA_LABELS = {
   descanso2: "Descanso 2"
 };
 
+// Por qué una llegada tarde se registró a mano en el panel y no con el lector.
+// Las mismas claves están en database.rules.json (registros/$id/manual/motivo).
+export const MANUAL_REASON_LABELS = {
+  "sin-tarjeta": "No trajo la tarjeta",
+  "no-la-paso": "No quiso pasarla",
+  "no-leyo": "La tarjeta no leyó",
+  otro: "Otro motivo"
+};
+
 export const EXCUSE_STATES = ["sin", "pendiente", "validada", "rechazada"];
 export const EXCUSE_FILTER_LABELS = {
   sin: "Sin excusa",
@@ -271,6 +280,14 @@ export function franjaLabel(key) {
   return FRANJA_LABELS[value] || value;
 }
 
+// "Lector NFC" o "Manual: No trajo la tarjeta (Ana Gómez)".
+export function registrationLabel(manual) {
+  if (!manual || typeof manual !== "object") return "Lector NFC";
+  const reason = MANUAL_REASON_LABELS[text(manual.motivo)] || "Sin motivo";
+  const author = text(manual.porNombre);
+  return "Manual: " + reason + (author ? " (" + author + ")" : "");
+}
+
 /*
  * Devuelve todas las llegadas tarde como objetos planos. Usa el mismo criterio
  * de inclusión del panel (tarde === true y UID válido) e incluye también los
@@ -306,6 +323,7 @@ export function normalizeLateEvents(records, students, evidence) {
       ? record.justificacion
       : null;
     const franja = text(record.periodo);
+    const manual = record.manual && typeof record.manual === "object" ? record.manual : null;
 
     events.push({
       id,
@@ -318,6 +336,8 @@ export function normalizeLateEvents(records, students, evidence) {
       time: formatSeconds(seconds),
       franja,
       franjaLabel: franjaLabel(franja),
+      manual: Boolean(manual),
+      registration: registrationLabel(manual),
       excuse: excuseStateOf(justification),
       reason: text(justification && justification.motivo),
       hasEvidence: Boolean(evidenceMap[id]),

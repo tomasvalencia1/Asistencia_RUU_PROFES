@@ -456,6 +456,43 @@ h2 { margin-bottom: 0; color: var(--navy); }
 .student-details[open] .chevron { transform: rotate(225deg) translate(-2px, -1px); }
 @media (prefers-reduced-motion: reduce) { .chevron { transition: none; } }
 
+/* Botón «Marcar tarde»: está fuera del <summary> (para no abrir el detalle) pero en su misma fila. */
+.student-card.has-manual-late {
+  --manual-late-width: 122px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.student-card.has-manual-late > .student-details { grid-area: 1 / 1 / 2 / 3; min-width: 0; }
+.student-card.has-manual-late > .student-details > summary { padding-right: calc(34px + var(--manual-late-width)); }
+.manual-late-button {
+  z-index: 1;
+  grid-area: 1 / 2;
+  align-self: start;
+  width: var(--manual-late-width);
+  margin: 12px 20px 0 0;
+}
+.manual-late-short { display: none; }
+.manual-tag {
+  justify-self: start;
+  padding: 1px 8px;
+  border-radius: 999px;
+  color: var(--purple);
+  background: #f1ecfb;
+  font-size: .72rem;
+  font-weight: 800;
+}
+.calendar-summary.is-error { color: var(--red); }
+@media (max-width: 560px) {
+  .student-card.has-manual-late { --manual-late-width: 72px; }
+  .student-card.has-manual-late > .student-details > summary { padding-right: calc(24px + var(--manual-late-width)); }
+  .manual-late-button { margin-right: 14px; }
+  .manual-late-long { display: none; }
+  .manual-late-short { display: inline; }
+}
+@media print {
+  .manual-late-button { display: none; }
+}
+
 .student-body { padding: 4px 20px 18px; background: #f4f8fb; }
 .student-meta {
   display: flex;

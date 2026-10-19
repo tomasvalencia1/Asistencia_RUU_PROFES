@@ -41,6 +41,31 @@ Nota sobre las reglas: Realtime Database no tiene `numChildren()`. Por eso las v
 
 Al quitar un estudiante se borra solamente su ficha de estudiantes. Sus tardanzas históricas permanecen visibles en los registros existentes.
 
+### Llegada tarde sin pasar la tarjeta (registro manual)
+
+Para el estudiante que no trajo la tarjeta, no quiso pasarla o cuya tarjeta no leyó. Docente, directivo y administrador lo registran desde el botón **Marcar tarde** de cada fila de «Estudiantes del grupo» (en el celular dice **Tarde**) o desde **Llegó tarde** en la tarjeta «Faltas» de «Hoy», donde aparece mientras no tenga ninguna lectura.
+
+- **Cuadro de confirmación:** se elige por qué no pasó la tarjeta (no la trajo, no quiso pasarla, la tarjeta no leyó u otro motivo) y la hora de llegada. La hora viene con la del servidor de Firebase; sólo se cambia si se registra un rato después. Sólo se registra el día de hoy.
+- **Mismas reglas del lector:** la franja sale de `config/franjas` (la última cuya hora límite ya pasó), no se puede registrar si a esa hora todavía no era tarde, ni en un día sin clases del grupo, ni si el estudiante ya tiene una lectura (del lector o manual) en esa franja de hoy.
+- **Cuenta igual que la tarjeta:** el registro tiene los mismos campos que escribe el lector y en la misma escritura suma uno a `llegadasTarde`. Deja de aparecer como falta, entra en «Llegaron tarde», en Informes y en el Excel, y se le puede poner excusa como a cualquier otra llegada tarde.
+- **Queda marcado:** en el detalle del estudiante aparece «Manual: No trajo la tarjeta (nombre de quien lo registró)», en «Hoy» e Informes dice «Registro manual», y el Excel tiene la columna **Registro** («Lector NFC» o «Manual: motivo (persona)»).
+- **No se deshace desde el panel**, porque los registros no se pueden cambiar. Si alguien se equivoca, un administrador lo borra en Firebase Console y resta uno a `llegadasTarde` de la ficha.
+
+Se guarda en `registros/manual_<fecha>_<franja>_<uid>` con los campos de siempre (`uid`, `nombre`, `grupo`, `fecha`, `hora`, `timestamp`, `periodo`, `tarde: true`) más:
+
+    manual: {
+      porUid: "<uid de quien lo registró>",
+      porNombre: "Rosa Díaz",              (el nombre de su perfil en /usuarios)
+      motivo: "sin-tarjeta",               (sin-tarjeta, no-la-paso, no-leyo u otro)
+      registradoEn: 1792433357046          (hora del servidor)
+    }
+
+Las reglas exigen que `porUid` y `porNombre` sean los de la cuenta que escribe, que la clave sea exactamente `manual_<fecha>_<franja>_<uid>` (así no puede haber dos registros manuales en la misma franja del mismo día, aunque dos personas lo intenten a la vez), que `tarde` sea `true` y que la hora de llegada no sea futura ni de hace más de un día. Después nadie puede añadir, cambiar ni quitar el bloque `manual`. Los registros del lector no cambian.
+
+**Importante:** publica primero las reglas (`firebase deploy --only database --project ieruu-asistencia`) y después la web; si no, Firebase rechaza el registro manual.
+
+Límite conocido: el lector Android no puede leer `/registros`, así que no sabe de los registros manuales. Si el estudiante pasa la tarjeta después en la misma franja, el lector guarda una segunda llegada tarde.
+
 ## Preparación única en Firebase
 
 ### 1. Crear o registrar la aplicación web
@@ -155,12 +180,13 @@ Para publicar, sube estos archivos a Firebase Hosting, Netlify, GitHub Pages o u
 
 ## Prueba recomendada
 
-1. Inicia sesión con una cuenta docente: debe poder ver grupos, tardanzas, motivos y estados, sin botones de modificación.
+1. Inicia sesión con una cuenta docente: debe poder ver grupos, tardanzas, motivos y estados, sin botones de modificación salvo **Marcar tarde** y **Llegó tarde**.
 2. Inicia sesión con una cuenta directivo: debe aparecer Añadir estudiante, Quitar estudiante (dentro del detalle de cada estudiante) y Agregar excusa.
 3. Agrega una ficha de prueba al grupo 6.1 y comprueba que aparece al instante al elegir ese grupo.
 4. Acerca su tarjeta al lector Android y confirma que la tardanza aparece en el mes correspondiente.
 5. Valida o rechaza la excusa y vuelve a entrar con una cuenta docente para confirmar que sólo puede leerla.
 6. Inicia sesión con el administrador y abre **Usuarios**. Crea una cuenta docente de prueba, edítala, y confirma que un docente no ve ese botón.
+7. Con la cuenta docente, pulsa **Marcar tarde** en un estudiante sin lectura hoy: debe pasar de «Faltas» a «Llegaron tarde» con «Registro manual». Intenta registrarlo otra vez en la misma franja: el cuadro debe impedirlo.
 
 ## Estructura nueva de una justificación
 

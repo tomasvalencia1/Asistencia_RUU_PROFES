@@ -9,6 +9,7 @@ import {
   runQuery,
   monthOptions,
   excelDateSerial,
+  registrationLabel,
   GROUPS,
   NO_GROUP
 } from "../query.js";
@@ -100,6 +101,24 @@ test("consulta combinada, búsqueda sin tildes y totales coherentes", () => {
   const onlyGroup = runQuery(events, week, { group: "10.2" });
   assert.equal(onlyGroup.byGroup.length, 1);
   assert.equal(onlyGroup.total, 1);
+});
+
+test("llegadas tarde manuales: cuentan igual y dicen quién y por qué", () => {
+  const manual = {
+    ...records,
+    manual_1: {
+      uid: "BB02", nombre: "Ana Gómez", grupo: "10.2", fecha: "2026-10-01", hora: "07:20:00", timestamp: at("2026-10-01T12:20:00Z"),
+      periodo: "entrada", tarde: true, manual: { porUid: "u1", porNombre: "Rosa Díaz", motivo: "sin-tarjeta", registradoEn: 1 }
+    }
+  };
+  const byId = Object.fromEntries(normalizeLateEvents(manual, students, {}).map((event) => [event.id, event]));
+  assert.equal(byId.manual_1.manual, true);
+  assert.equal(byId.manual_1.registration, "Manual: No trajo la tarjeta (Rosa Díaz)");
+  assert.equal(byId.r1.manual, false);
+  assert.equal(byId.r1.registration, "Lector NFC");
+  assert.equal(registrationLabel({ motivo: "desconocido" }), "Manual: Sin motivo");
+  const week = periodRange({ type: "semana-de", value: "2026-10-01" });
+  assert.equal(runQuery(normalizeLateEvents(manual, students, {}), week, {}).total, 6);
 });
 
 test("periodo sin datos devuelve ceros, no errores", () => {

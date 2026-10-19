@@ -278,7 +278,7 @@ def test_export(browser, db):
     page.fill("#statsNameInput", "ñusta")
     name, path = download_xlsx(page, "dia-nusta.xlsx")
     workbook, summary, detail, total_row, rows = inspect_xlsx(path)
-    check("tildes y ñ intactas", rows and rows[0][2] == "Ñusta Ibáñez Úsuga" and rows[0][6] == "Cita odontológica — acudiente", repr(rows[:1]))
+    check("tildes y ñ intactas", rows and rows[0][2] == "Ñusta Ibáñez Úsuga" and rows[0][5] == "Lector NFC" and rows[0][7] == "Cita odontológica — acudiente", repr(rows[:1]))
     check("filtro de nombre descrito en el resumen", "ñusta" in summary["B5"].value, summary["B5"].value)
 
     # Periodo vacío.

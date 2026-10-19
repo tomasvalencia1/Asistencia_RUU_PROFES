@@ -177,6 +177,11 @@ export function createStatsView(options) {
       who.append(element("strong", "", event.name));
       const meta = element("span", "", (event.group === NO_GROUP ? NO_GROUP : "Grupo " + event.group) + " · " + event.franjaLabel);
       who.append(meta);
+      if (event.manual) {
+        const tag = element("span", "stats-tag", "Registro manual");
+        tag.title = event.registration;
+        who.append(tag);
+      }
       if (event.removed) who.append(element("span", "stats-tag", "Ya no figura en estudiantes"));
 
       const excuse = element("div", "stats-item-excuse");

@@ -39,6 +39,7 @@ function writePath(path, value) {
   });
   const last = parts.at(-1);
   if (value === null || value === undefined) delete node[last];
+  else if (value.__increment !== undefined) node[last] = (Number(node[last]) || 0) + value.__increment;
   else node[last] = JSON.parse(JSON.stringify(value));
 }
 
@@ -78,6 +79,15 @@ function canWrite() {
   return Boolean(profile && profile.activo === true && (profile.rol === "directivo" || profile.rol === "admin"));
 }
 
+// Como en las reglas: toda cuenta activa del panel crea lecturas nuevas (nunca reemplaza una) y suma
+// al contador; la clave fija de los registros manuales impide repetirlos.
+function canWriteReading(paths) {
+  const profile = mock.db.usuarios && mock.db.usuarios[mock.user && mock.user.uid];
+  if (!profile || profile.activo !== true || !["docente", "directivo", "admin"].includes(profile.rol)) return false;
+  return paths.every((path) =>
+    (/^registros\/[^/]+$/.test(path) && readPath(path) === null) || /^estudiantes\/[^/]+\/llegadasTarde$/.test(path));
+}
+
 function denied() {
   const error = new Error("PERMISSION_DENIED");
   error.code = "PERMISSION_DENIED";
@@ -112,6 +122,7 @@ export function getDatabase() { return {}; }
 export function ref(database, path) { return { path: path || "" }; }
 // En Firebase real el servidor reemplaza este marcador por su hora; aquí se usa la del navegador.
 export function serverTimestamp() { return Date.now(); }
+export function increment(delta) { return { __increment: delta }; }
 export function onValue(reference, callback) {
   const listener = { path: reference.path, constraints: reference.constraints, callback };
   listeners.add(listener);
@@ -132,7 +143,9 @@ export async function set(reference, value) {
 }
 export async function update(reference, values) {
   mock.calls.push({ op: "update", path: reference.path, value: values });
-  if (!canWrite()) throw denied();
+  const paths = Object.keys(values).map((key) => pathParts(reference.path + "/" + key).join("/"));
+  if (!canWriteReading(paths) && !canWrite()) throw denied();
+  if (paths.some((path) => /^registros\/manual_[^/]+$/.test(path) && readPath(path) !== null)) throw denied();
   Object.entries(values).forEach(([key, value]) => writePath(reference.path + "/" + key, value));
   notify();
 }

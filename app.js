@@ -28,6 +28,7 @@ import {
   endBefore,
   get,
   getDatabase,
+  increment,
   limitToFirst,
   onValue,
   orderByChild,
@@ -45,6 +46,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-functions.js";
 import { firebaseConfig } from "./firebase-config.js";
 import {
+  MANUAL_REASON_LABELS,
   addDays,
   bogotaParts,
   dayNumber,
@@ -55,6 +57,7 @@ import {
   makeDayKey,
   monthKeyOf,
   normalizeLateEvents,
+  registrationLabel,
   shiftMonth,
   todayKey,
   weekdayFromMonday
@@ -186,6 +189,14 @@ const elements = {
   studentGroupInput: document.querySelector("#studentGroupInput"),
   studentFormError: document.querySelector("#studentFormError"),
   saveStudentButton: document.querySelector("#saveStudentButton"),
+  manualLateDialog: document.querySelector("#manualLateDialog"),
+  manualLateForm: document.querySelector("#manualLateForm"),
+  manualLateInfo: document.querySelector("#manualLateInfo"),
+  manualReasonInputs: [...document.querySelectorAll("input[name='manualReason']")],
+  manualLateTime: document.querySelector("#manualLateTime"),
+  manualLateSummary: document.querySelector("#manualLateSummary"),
+  manualLateError: document.querySelector("#manualLateError"),
+  saveManualLateButton: document.querySelector("#saveManualLateButton"),
   excuseDialog: document.querySelector("#excuseDialog"),
   excuseForm: document.querySelector("#excuseForm"),
   excuseDialogEyebrow: document.querySelector("#excuseDialogEyebrow"),
@@ -253,6 +264,16 @@ const state = {
   // Días sin clases (config/diasSinClases): no se cuentan llegadas tarde ni faltas.
   noClassPeriods: {},
   noClassUnsubscribe: null,
+  // Horas límite de cada franja (config/franjas), las mismas que usa el lector.
+  franjas: {},
+  franjasUnsubscribe: null,
+  // Diferencia entre el reloj del servidor de Firebase y el del navegador.
+  serverOffset: 0,
+  serverOffsetUnsubscribe: null,
+  // Llegada tarde manual: estudiante del diálogo abierto y si se cambió la hora a mano.
+  manualStudent: null,
+  manualTimeEdited: false,
+  manualSaving: false,
   calendar: { month: "", start: "", end: "", notice: "" },
   evidence: {},
   evidenceUnsubscribe: null,
@@ -376,6 +397,7 @@ function showLogin() {
   closeDialog(elements.calendarDialog);
   closeDialog(elements.excuseDialog);
   closeDialog(elements.studentDialog);
+  closeDialog(elements.manualLateDialog);
   closeDialog(elements.evidenceViewer);
   elements.appView.hidden = true;
   elements.loginView.hidden = false;
@@ -402,11 +424,15 @@ function detachDatabaseListeners() {
   if (state.evidenceUnsubscribe) state.evidenceUnsubscribe();
   if (state.faltasUnsubscribe) state.faltasUnsubscribe();
   if (state.noClassUnsubscribe) state.noClassUnsubscribe();
+  if (state.franjasUnsubscribe) state.franjasUnsubscribe();
+  if (state.serverOffsetUnsubscribe) state.serverOffsetUnsubscribe();
   state.studentUnsubscribe = null;
   state.recordUnsubscribe = null;
   state.evidenceUnsubscribe = null;
   state.faltasUnsubscribe = null;
   state.noClassUnsubscribe = null;
+  state.franjasUnsubscribe = null;
+  state.serverOffsetUnsubscribe = null;
 }
 
 function profileErrorMessage(error) {
@@ -524,6 +550,23 @@ function subscribeToData() {
       state.noClassPeriods = {};
     }
   );
+
+  // Para registrar llegadas tarde a mano con la misma franja y la misma hora que usaría el lector.
+  state.franjasUnsubscribe = onValue(
+    ref(database, "config/franjas"),
+    (snapshot) => {
+      state.franjas = snapshot.val() || {};
+      if (elements.manualLateDialog.open && !state.manualSaving) renderManualLateCheck();
+    },
+    (error) => {
+      console.warn("No fue posible leer las franjas", error);
+      state.franjas = {};
+    }
+  );
+  state.serverOffsetUnsubscribe = onValue(ref(database, ".info/serverTimeOffset"), (snapshot) => {
+    const offset = Number(snapshot.val());
+    state.serverOffset = Number.isFinite(offset) ? offset : 0;
+  });
 }
 
 /* ---------- Lecturas de años anteriores ---------- */
@@ -1089,7 +1132,9 @@ function indexRecords() {
       month: day ? day.slice(0, 7) : "sin-fecha",
       franja: franjaLabel(rawRecord.periodo),
       exactDate: (day ? shortDayLabel(day) : "Sin fecha") + (time ? " · " + clockLabel(time) : ""),
-      justification
+      justification,
+      // Registrada a mano en el panel (sin pasar la tarjeta): quién y por qué.
+      manual: rawRecord.manual && typeof rawRecord.manual === "object" ? rawRecord.manual : null
     };
 
     if (!lateByUid.has(uid)) lateByUid.set(uid, []);
@@ -1275,6 +1320,7 @@ function renderEvents(student) {
         const when = createElement("div", "event-when");
         when.append(createElement("span", "event-date", event.exactDate));
         when.append(createElement("span", "event-franja", event.franja));
+        if (event.manual) when.append(createElement("span", "manual-tag", registrationLabel(event.manual)));
         const excuse = excusePresentation(event.justification);
         const excuseArea = createElement("div", "event-excuse");
         const excuseText = createElement("div", "event-excuse-text");
@@ -1342,6 +1388,16 @@ function renderStudent(student, options) {
 
   details.append(summary, body);
   card.append(details);
+  // Fuera del <summary> para no abrir el detalle al tocarlo; el CSS lo pone en la misma fila.
+  if (isActiveStaff(state.profile)) {
+    card.classList.add("has-manual-late");
+    const button = createElement("button", "small-button manual-late-button");
+    button.type = "button";
+    button.append(createElement("span", "manual-late-long", "Marcar tarde"), createElement("span", "manual-late-short", "Tarde"));
+    button.setAttribute("aria-label", "Registrar llegada tarde de " + student.name + " sin tarjeta");
+    button.addEventListener("click", () => openManualLateDialog(student));
+    card.append(button);
+  }
   return card;
 }
 
@@ -1370,7 +1426,7 @@ function renderToday(members, model) {
     row.append(createElement("span", "today-time", clockLabel(event.time) || "—"));
     const who = createElement("span", "today-who");
     who.append(createElement("strong", "", student.name));
-    who.append(createElement("small", "", event.franja));
+    who.append(createElement("small", "", event.franja + (event.manual ? " · Registro manual" : "")));
     row.append(who);
     const excuse = excusePresentation(event.justification);
     row.append(createElement("span", "state-pill state-" + excuse.state, excuse.label));
@@ -1410,6 +1466,12 @@ function renderToday(members, model) {
     const pill = createElement("span", "state-pill state-" + (excuse.state === "empty" ? "falta" : excuse.state), excuse.state === "empty" ? "Sin excusa" : excuse.label);
     if (excuse.detail) pill.title = excuse.detail;
     card.append(pill);
+    // Llegó sin la tarjeta o no quiso pasarla: aparece aquí como falta hasta que se registre.
+    const lateButton = createElement("button", "small-button", "Llegó tarde");
+    lateButton.type = "button";
+    lateButton.setAttribute("aria-label", "Registrar llegada tarde de " + student.name + " sin tarjeta");
+    lateButton.addEventListener("click", () => openManualLateDialog(student));
+    card.append(lateButton);
     if (canManage()) {
       const button = createElement("button", "small-button", falta.faltaExcuse ? "Editar" : "Excusa");
       button.type = "button";
@@ -1647,12 +1709,214 @@ async function deleteFaltaExcuse() {
   }
 }
 
+/* ---------- Llegada tarde manual (el estudiante no pasó la tarjeta) ---------- */
+
+// Hora del servidor de Firebase, como en el lector: no depende de que el reloj del equipo esté bien.
+function serverNow() {
+  return Date.now() + state.serverOffset;
+}
+
+function twoDigits(value) {
+  return String(value).padStart(2, "0");
+}
+
+// "7:05", "07:05" o "07:05:30" → segundos desde la medianoche; null si no es una hora válida.
+function secondsOfDay(value) {
+  const match = text(value).match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (!match) return null;
+  const [hours, minutes, seconds] = [Number(match[1]), Number(match[2]), Number(match[3] || 0)];
+  if (hours > 23 || minutes > 59 || seconds > 59) return null;
+  return hours * 3600 + minutes * 60 + seconds;
+}
+
+// 25530 → "07:05:30"
+function timeOfDay(seconds) {
+  return twoDigits(Math.floor(seconds / 3600)) + ":" + twoDigits(Math.floor((seconds % 3600) / 60)) + ":" + twoDigits(seconds % 60);
+}
+
+function lateByLabel(minutes) {
+  if (minutes < 1) return "menos de 1 min";
+  if (minutes < 60) return String(minutes) + " min";
+  return String(Math.floor(minutes / 60)) + " h" + (minutes % 60 ? " " + String(minutes % 60) + " min" : "");
+}
+
+// La misma regla del lector: la última franja cuya hora límite ya pasó; antes de la primera, la primera.
+function franjaAt(seconds) {
+  const franjas = Object.entries(state.franjas)
+    .map(([id, value]) => ({ id, limit: secondsOfDay(value && value.horaLimite) }))
+    .filter((franja) => franja.limit !== null)
+    .sort((first, second) => first.limit - second.limit);
+  return franjas.filter((franja) => seconds >= franja.limit).pop() || franjas[0] || null;
+}
+
+// Lectura de ese estudiante en esa franja del día (del lector o manual), si ya existe.
+function recordInFranja(uid, day, franjaId) {
+  return Object.values(state.records).find((record) =>
+    record && typeof record === "object" &&
+    uidKey(record.uid) === uid && recordDay(record) === day && text(record.periodo) === franjaId
+  ) || null;
+}
+
+/*
+ * Lo que se guardaría con lo que muestra el diálogo, o por qué no se puede. Repite lo que hace el
+ * lector (día sin clases, franja vigente, una sola lectura por franja) y lo que exigen las reglas
+ * (nombre y grupo idénticos a la ficha, contador numérico).
+ */
+function manualLateCheck() {
+  const student = state.manualStudent;
+  const ficha = student ? state.students[student.firebaseKey] : null;
+  if (!ficha || typeof ficha !== "object") return { error: "Este estudiante ya no está en la lista." };
+  if (!GROUPS.includes(ficha.grupo)) {
+    return { error: "El grupo de la ficha («" + text(ficha.grupo) + "») no tiene el formato 6.1 a 11.3. Hay que corregirlo antes de registrar." };
+  }
+  if (typeof ficha.llegadasTarde !== "number") {
+    return { error: "A la ficha le falta el contador de llegadas tarde. Pide a coordinación que la revise." };
+  }
+
+  const nowMs = serverNow();
+  const day = todayKey(nowMs);
+  const off = noClassPeriodFor(day, ficha.grupo);
+  if (off) {
+    return {
+      error: (off.groups ? "Hoy el grupo " + ficha.grupo + " no tiene clases" : "Hoy no hay clases") +
+        " (" + off.motivo + "). No se registran llegadas tarde."
+    };
+  }
+
+  const now = bogotaParts(nowMs);
+  const nowSeconds = now.hour * 3600 + now.minute * 60 + now.second;
+  const seconds = state.manualTimeEdited ? secondsOfDay(elements.manualLateTime.value) : nowSeconds;
+  if (seconds === null) return { error: "Escribe la hora a la que llegó." };
+  if (seconds > nowSeconds) return { error: "La hora de llegada no puede ser posterior a la hora actual." };
+
+  const franja = franjaAt(seconds);
+  if (!franja) {
+    return { error: "Faltan los horarios de las franjas (config/franjas). Pide a administración que los configure." };
+  }
+  if (seconds <= franja.limit) {
+    return {
+      error: "A las " + clockLabel(timeOfDay(seconds)) + " todavía no es tarde (la hora límite de " +
+        franjaLabel(franja.id) + " es " + clockLabel(timeOfDay(franja.limit)) + ")."
+    };
+  }
+  const previous = recordInFranja(student.uid, day, franja.id);
+  if (previous) {
+    const result = previous.tarde === true || previous.tarde === "true" ? "llegó tarde" : "a tiempo";
+    return {
+      error: "Ya tiene registro en " + franjaLabel(franja.id) + " hoy (" + clockLabel(recordTime(previous)) + ", " +
+        result + "). No se registra dos veces en la misma franja."
+    };
+  }
+
+  const hora = timeOfDay(seconds);
+  return {
+    error: "",
+    ficha,
+    day,
+    franja,
+    hora,
+    timestamp: state.manualTimeEdited ? Date.parse(day + "T" + hora + "-05:00") : nowMs,
+    minutesLate: Math.floor((seconds - franja.limit) / 60)
+  };
+}
+
+function showManualLateError(message) {
+  elements.manualLateError.textContent = message;
+  elements.manualLateError.hidden = !message;
+}
+
+function renderManualLateCheck() {
+  const check = manualLateCheck();
+  elements.saveManualLateButton.disabled = Boolean(check.error);
+  elements.manualLateSummary.classList.toggle("is-error", Boolean(check.error));
+  elements.manualLateSummary.textContent = check.error ||
+    "Queda en la franja " + franjaLabel(check.franja.id) + " (hora límite " + clockLabel(timeOfDay(check.franja.limit)) +
+    "): " + lateByLabel(check.minutesLate) + " tarde.";
+  return check;
+}
+
+function openManualLateDialog(student) {
+  if (!isActiveStaff(state.profile)) return;
+  state.manualStudent = student;
+  state.manualTimeEdited = false;
+  elements.manualLateForm.reset();
+  const nowMs = serverNow();
+  const now = bogotaParts(nowMs);
+  elements.manualLateTime.value = twoDigits(now.hour) + ":" + twoDigits(now.minute);
+  elements.manualLateInfo.textContent = student.name + " · Grupo " + student.group + " · " + formatDayLong(todayKey(nowMs));
+  showManualLateError("");
+  renderManualLateCheck();
+  openDialog(elements.manualLateDialog);
+  const reason = elements.manualReasonInputs.find((input) => input.checked);
+  if (reason) reason.focus();
+}
+
+async function saveManualLate(event) {
+  event.preventDefault();
+  const student = state.manualStudent;
+  if (!isActiveStaff(state.profile) || !student) return;
+
+  const check = renderManualLateCheck();
+  if (check.error) return;
+  const reasonInput = elements.manualReasonInputs.find((input) => input.checked);
+  const reason = reasonInput ? reasonInput.value : "";
+  if (!MANUAL_REASON_LABELS[reason]) {
+    showManualLateError("Elige por qué no pasó la tarjeta.");
+    return;
+  }
+
+  // Clave fija por día, franja y estudiante: las reglas no aceptan un segundo registro manual igual.
+  const key = "manual_" + check.day + "_" + check.franja.id + "_" + student.firebaseKey;
+  elements.saveManualLateButton.disabled = true;
+  showManualLateError("");
+  // Firebase avisa la escritura en vivo antes de confirmarla; mientras tanto no se vuelve a revisar
+  // el diálogo (si no, mostraría «ya tiene registro» por el registro que se está guardando).
+  state.manualSaving = true;
+  try {
+    // El mismo registro del lector (nombre y grupo idénticos a la ficha) más el bloque `manual`;
+    // el contador de la ficha sube en la misma escritura, igual que con la tarjeta.
+    await update(ref(database), {
+      ["registros/" + key]: {
+        uid: student.firebaseKey,
+        nombre: check.ficha.nombre,
+        grupo: check.ficha.grupo,
+        fecha: check.day,
+        hora: check.hora,
+        timestamp: check.timestamp,
+        periodo: check.franja.id,
+        tarde: true,
+        manual: {
+          porUid: state.authUser.uid,
+          porNombre: state.profile.nombre,
+          motivo: reason,
+          registradoEn: serverTimestamp()
+        }
+      },
+      ["estudiantes/" + student.firebaseKey + "/llegadasTarde"]: increment(1)
+    });
+    closeDialog(elements.manualLateDialog);
+    setStatus(
+      "Llegada tarde de " + student.name + " registrada a mano (" + franjaLabel(check.franja.id) + ", " + clockLabel(check.hora) + ").",
+      false
+    );
+  } catch (error) {
+    console.error("No fue posible registrar la llegada tarde manual", error);
+    showManualLateError(error && error.code === "PERMISSION_DENIED"
+      ? "Firebase no aceptó el registro. Puede que alguien ya lo haya registrado o que falte publicar las reglas nuevas de la base de datos."
+      : "No se pudo registrar. Verifica Internet e inténtalo de nuevo.");
+  } finally {
+    state.manualSaving = false;
+    elements.saveManualLateButton.disabled = false;
+  }
+}
+
 function render() {
   const model = buildModel();
   renderWarning(model.rows);
   renderGroupPicker(model.rows);
   renderGroup(model);
   statsView.refresh();
+  if (elements.manualLateDialog.open && !state.manualSaving) renderManualLateCheck();
 }
 
 function populateStudentGroups() {
@@ -2281,6 +2545,14 @@ elements.groupReportButton.addEventListener("click", () => {
   if (isActiveStaff(state.profile)) statsView.open({ period: "mes", group: state.activeGroup });
 });
 elements.studentForm.addEventListener("submit", saveStudent);
+elements.manualLateForm.addEventListener("submit", saveManualLate);
+elements.manualLateTime.addEventListener("input", () => {
+  state.manualTimeEdited = true;
+  renderManualLateCheck();
+});
+elements.manualLateDialog.addEventListener("close", () => {
+  state.manualStudent = null;
+});
 elements.excuseForm.addEventListener("submit", saveExcuse);
 elements.deleteExcuseButton.addEventListener("click", deleteExcuse);
 elements.faltaFromInput.addEventListener("input", renderFaltaRangeSummary);
@@ -2398,6 +2670,8 @@ onAuthStateChanged(auth, async (user) => {
   state.openStudents.clear();
   state.openMonths.clear();
   state.noClassPeriods = {};
+  state.franjas = {};
+  state.manualStudent = null;
   state.managedUsers = [];
   state.editingUserUid = null;
 
