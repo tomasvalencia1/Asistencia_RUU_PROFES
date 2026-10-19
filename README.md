@@ -64,7 +64,7 @@ Las reglas exigen que `porUid` y `porNombre` sean los de la cuenta que escribe, 
 
 **Importante:** publica primero las reglas (`firebase deploy --only database --project ieruu-asistencia`) y después la web; si no, Firebase rechaza el registro manual.
 
-Límite conocido: el lector Android no puede leer `/registros`, así que no sabe de los registros manuales. Si el estudiante pasa la tarjeta después en la misma franja, el lector guarda una segunda llegada tarde.
+**Con el lector Android:** desde la versión 4.4, antes de guardar una tarjeta el lector pregunta por `registros/manual_<fecha>_<franja>_<uid>`. Si un docente ya lo registró a mano en esa franja, muestra «YA REGISTRADO · Lo registró a mano (nombre) en el panel» y no guarda otra llegada tarde. Para eso las reglas dejan que una cuenta activa de rol lector lea **sólo** las claves que empiezan por `manual_`, una por una; sigue sin poder listar `/registros` ni leer las lecturas del lector. Sin conexión, sin respuesta en 4 segundos o con las reglas anteriores, el lector guarda la tarjeta como antes, porque es peor dejar a un estudiante sin registro. Las versiones 4.3 y anteriores no hacen esta consulta.
 
 ## Preparación única en Firebase
 

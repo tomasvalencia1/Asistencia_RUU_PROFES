@@ -276,6 +276,21 @@ test("registro manual: sin sesión o con cuenta desactivada no se puede", async 
   }
 });
 
+test("lector: consulta un registro manual por su clave, pero no lista ni lee lecturas del lector", async () => {
+  const { key, record } = manualRecord("doc", "entrada");
+  await env.withSecurityRulesDisabled(async (context) => {
+    await context.database().ref("registros/" + key).set({ ...record, manual: { ...record.manual, registradoEn: 1 } });
+  });
+  await assertSucceeds(db("lec").ref("registros/" + key).once("value"));
+  // Si no existe también se puede preguntar: así el lector sabe que puede guardar.
+  await assertSucceeds(db("lec").ref("registros/manual_2026-10-04_entrada_5AD56CAD1D4187").once("value"));
+  await assertFails(db("lec").ref("registros/r1").once("value"));
+  await assertFails(db("lec").ref("registros").once("value"));
+  for (const uid of [null, "lecoff", "off"]) {
+    await assertFails(db(uid).ref("registros/" + key).once("value"));
+  }
+});
+
 test("registro manual: el bloque manual no se añade, cambia ni quita después; la excusa sí", async () => {
   const { key, record } = manualRecord("doc", "entrada");
   await env.withSecurityRulesDisabled(async (context) => {
